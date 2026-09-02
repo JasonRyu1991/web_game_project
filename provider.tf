@@ -7,6 +7,11 @@ terraform {
       version = "~> 8.0"
     }
   }
+
+  backend "gcs" {
+    bucket = "personal-webgame-project-tfstate"
+    prefix = "terraform/state"
+  }
 }
 
 provider "google" {
