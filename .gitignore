@@ -1,2 +1,6 @@
 .terraform
 _trash/
+*.tfvars
+*.tfstate
+*.tfstate.*
+crash.log

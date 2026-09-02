@@ -1,14 +1,16 @@
 terraform {
+  required_version = "~> 1.15"
+
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = "8.0.0"
+      version = "~> 8.0"
     }
   }
 }
 
 provider "google" {
-  project     = "personal-webgame-project"
-  region      = "asia-northeast3"
-  zone        = "asia-northeast3-a"
+  project = var.project_id
+  region  = var.region
+  zone    = var.zone
 }
