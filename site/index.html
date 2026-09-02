@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0b0b0d">
+<title>1bit.kr</title>
+<link rel="icon" href="data:,">
+<style>
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{height:100%}
+  body{margin:0;background:#0b0b0d;color:#d8d8d8;
+       font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+       display:flex;flex-direction:column;align-items:center;
+       overflow:hidden;overscroll-behavior:none;
+       -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+
+  /* 캔버스가 남는 세로 공간을 전부 먹는다. min-height:0 이 없으면 flex 자식이 안 줄어든다 */
+  #wrap{position:relative;flex:1;width:100%;max-width:1100px;min-height:0}
+  canvas{display:block;width:100%;height:100%;background:#000;cursor:crosshair;touch-action:none}
+
+  #hud{position:absolute;left:0;top:0;right:0;display:flex;flex-wrap:wrap;gap:2px 16px;
+       padding:calc(6px + env(safe-area-inset-top)) 12px 10px;
+       background:linear-gradient(#000b,transparent);pointer-events:none;
+       font-size:clamp(12px,2.6vw,15px);letter-spacing:.5px}
+  #hud b{color:#fff}
+  #ammo.low{color:#f55}
+
+  /* 체력은 숫자만으로는 전투 중에 안 읽힌다. 막대를 같이 둔다 */
+  #vit{display:flex;align-items:center;gap:8px}
+  #hpbar{width:clamp(64px,13vw,110px);height:10px;border:1px solid #5a4046;
+         background:#1b1216;border-radius:2px;overflow:hidden}
+  #hpbar i{display:block;height:100%;width:100%;
+           background:linear-gradient(#7ef0a8,#2fae63);transition:width .12s linear}
+  #hpbar.warn i{background:linear-gradient(#ffd166,#e08c1a)}
+  #hpbar.crit i{background:linear-gradient(#ff7b7b,#c62828)}
+  #hp.crit{color:#ff6b6b}
+
+  /* 아이템을 주우면 잠깐 뜨는 안내 */
+  #toast{position:absolute;left:50%;top:24%;transform:translateX(-50%);
+         padding:6px 14px;border-radius:3px;background:#12151ad9;border:1px solid #4a505c;
+         color:#e9edf3;font-size:14px;white-space:nowrap;pointer-events:none;
+         opacity:0;transition:opacity .25s}
+  #toast.show{opacity:1}
+
+  #over{position:absolute;inset:0;display:grid;place-content:center;text-align:center;
+        background:#000c;font-size:clamp(16px,4vw,20px)}
+  #over small{display:block;margin-top:10px;font-size:14px;color:#999}
+
+  /* 터치 조작판. 조이스틱은 늘 보이게 둔다 — 눌러 봐야 나타나면 있는 줄 모른다 */
+  #pad{position:absolute;inset:0;pointer-events:none;
+       --sz:clamp(96px,26vmin,148px);
+       --edge:14px;
+       --gapx:calc(var(--edge) + var(--sz) + 26px)}
+  #pad > *{pointer-events:auto;position:absolute;touch-action:none;
+           -webkit-touch-callout:none}
+
+  .stick{bottom:calc(var(--edge) + env(safe-area-inset-bottom));
+         width:var(--sz);height:var(--sz);border-radius:50%;
+         background:#12151abb;border:2px solid #515867}
+  .stick i{position:absolute;left:50%;top:50%;width:46%;height:46%;margin:-23% 0 0 -23%;
+           border-radius:50%;background:#c9d1dccc;border:1px solid #99a2b0;
+           transform:translate(0,0)}
+  .stick b{position:absolute;left:0;right:0;bottom:calc(100% + 5px);text-align:center;
+           font-size:11px;font-weight:400;color:#7c8492;letter-spacing:1px}
+  #s-move{left:calc(var(--edge) + env(safe-area-inset-left))}
+  #s-look{right:calc(var(--edge) + env(safe-area-inset-right))}
+
+  #pad button{-webkit-appearance:none;appearance:none;font:inherit;color:#dfe3ea;
+              background:#1c1f26cc;border:1px solid #4a505c;border-radius:50%;
+              display:grid;place-items:center}
+  #pad button:active{background:#39424f;border-color:#8b93a2}
+  #b-fire{right:calc(var(--edge) + env(safe-area-inset-right));
+          bottom:calc(var(--gapx) + env(safe-area-inset-bottom));
+          width:80px;height:80px;font-size:15px}
+  .mini{left:calc(var(--edge) + env(safe-area-inset-left));
+        bottom:calc(var(--gapx) + env(safe-area-inset-bottom));
+        display:flex;gap:8px;background:none;border:0;padding:0}
+  .mini button{width:54px;height:54px;font-size:11px;letter-spacing:-.3px}
+
+  footer{margin:8px 10px calc(8px + env(safe-area-inset-bottom));color:#777;font-size:13px;
+         text-align:center;flex:none}
+  kbd{background:#26262c;border:1px solid #3a3a42;border-radius:4px;padding:1px 6px;color:#ddd}
+  body.touch footer{display:none}
+</style>
+
+<div id="wrap">
+  <canvas id="view"></canvas>
+  <div id="hud">
+    <span id="vit">체력 <b id="hp">100</b><span id="hpbar"><i></i></span></span>
+    <span>무기 <b id="gun">AK-47</b></span>
+    <span>탄약 <b id="ammo">30 / 120</b></span>
+    <span>웨이브 <b id="wave">1</b></span>
+    <span>점수 <b id="score">0</b></span>
+  </div>
+  <div id="toast"></div>
+  <div id="over" hidden>
+    사망 · 점수 <b id="final">0</b>
+    <small><kbd>Enter</kbd> 또는 화면을 눌러 다시 시작</small>
+  </div>
+  <div id="pad" hidden>
+    <div class="stick" id="s-move"><i></i><b>이동</b></div>
+    <div class="stick" id="s-look"><i></i><b>조준</b></div>
+    <button id="b-fire" type="button">발사</button>
+    <div class="mini">
+      <button id="b-reload" type="button">장전</button>
+      <button id="b-swap" type="button">무기</button>
+    </div>
+  </div>
+</div>
+
+<footer>
+  <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동 ·
+  <kbd>마우스</kbd> 조준 · <kbd>좌클릭</kbd> 발사 · <kbd>R</kbd> 장전 ·
+  <kbd>1</kbd> AK-47 · <kbd>2</kbd> 리볼버 · <kbd>Esc</kbd> 잠금 해제
+  <br>화면을 클릭하면 마우스가 잠기면서 시작합니다.
+</footer>
+
+<script src="engine.js"></script>
+<script src="game.js"></script>

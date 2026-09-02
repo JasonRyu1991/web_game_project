@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=IBM+Plex+Sans+KR:wght@400;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<title>방치의 숲</title>
+<style>
+  /* 팔레트는 스프라이트에서 뽑았다 — 슬라임 초록, 하늘 파랑, 푸 노랑/빨강.
+     중성색도 순회색이 아니라 숲 쪽으로 살짝 기울여 둔다.
+     게임 HUD 라서 라이트/다크 전환 없이 한 가지 화면으로 못 박는다. */
+  :root{
+    --ground:#12180f; --panel:#1b2416; --raise:#232f1c; --line:#2f3d26;
+    --ink:#e9f0e2; --dim:#93a486;
+    --gold:#f2c14e; --hp:#7ac74f; --xp:#6fc0e8; --danger:#d94b3a;
+    --display:'Do Hyeon', ui-sans-serif, system-ui, sans-serif;
+    --ui:'IBM Plex Sans KR', ui-sans-serif, 'Apple SD Gothic Neo', sans-serif;
+    --mono:'IBM Plex Mono', ui-monospace, monospace;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none}
+  html,body{margin:0;height:100%;background:var(--ground);color:var(--ink);
+    font:400 14px/1.45 var(--ui);overflow:hidden}
+  #wrap{display:flex;flex-direction:column;height:100%}
+  :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+  /* 상단 HUD */
+  #hud{display:flex;gap:14px;align-items:center;padding:9px 12px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .who{display:flex;gap:7px;align-items:baseline}
+  .who b{font:400 19px/1 var(--display);letter-spacing:.02em}
+  .lv{font:600 13px var(--mono);color:var(--gold);font-variant-numeric:tabular-nums}
+  .mode{font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);letter-spacing:.05em}
+  .mode.auto{color:var(--hp);border-color:#3c5a2c}
+  .mode.manual{color:var(--gold);border-color:#5c4a24}
+  .bars{flex:1;min-width:200px;max-width:420px;display:flex;flex-direction:column;gap:4px}
+  .track{position:relative;height:15px;border-radius:3px;background:#0a0f08;
+    border:1px solid var(--line);overflow:hidden}
+  .track i{display:block;height:100%;transition:width .12s linear}
+  .track span{position:absolute;inset:0;text-align:center;
+    font:500 11px/15px var(--mono);color:#dbe6d4;font-variant-numeric:tabular-nums;
+    text-shadow:0 1px 2px rgba(0,0,0,.8)}
+  .stat{display:flex;gap:14px;font-size:12px;color:var(--dim);white-space:nowrap}
+  .hudbtns{display:flex;gap:6px;margin-left:auto}
+  .hudbtns button{width:auto;padding:6px 12px;font:400 14px var(--display)}
+  .hudbtns b{font:600 12px var(--mono);color:var(--gold);margin-left:4px}
+  .stat b{color:var(--ink);font:600 13px var(--mono);font-variant-numeric:tabular-nums}
+
+  /* 게임 화면 */
+  #stage{position:relative;flex:1;min-height:0}
+  #game{width:100%;height:100%;display:block;image-rendering:pixelated}
+
+  /* 장비 */
+  #gear{position:absolute;left:12px;top:12px;display:flex;gap:7px}
+  .slot{background:rgba(18,24,15,.85);border:1px solid;border-radius:4px;padding:7px 9px;min-width:84px}
+  .sname{font-size:10px;color:var(--dim);letter-spacing:.08em}
+  .sval{font:400 15px/1.25 var(--display)}
+  .sstat{font:500 10px var(--mono);color:var(--dim);font-variant-numeric:tabular-nums}
+
+  /* 채널 · 소환 */
+  #channel{position:absolute;right:12px;top:12px;width:202px;background:rgba(18,24,15,.88);
+    border:1px solid var(--line);border-radius:5px;padding:10px}
+  #channel h4{margin:0 0 8px;font:400 16px/1 var(--display);color:var(--ink)}
+  #channel h4 span{color:var(--gold)}
+  .crow2{display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px;color:var(--dim)}
+  .crow2 b{color:var(--ink);font:600 12px var(--mono);font-variant-numeric:tabular-nums}
+  .gtrack{height:8px;background:#0a0f08;border:1px solid var(--line);border-radius:2px;overflow:hidden;margin:4px 0 8px}
+  .gtrack i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--danger));transition:width .2s}
+  .glabel{display:flex;justify-content:space-between;font-size:11px;color:var(--dim)}
+  .glabel b{font:500 11px var(--mono);font-variant-numeric:tabular-nums}
+  button{width:100%;padding:8px;border-radius:4px;border:1px solid var(--line);
+    background:var(--raise);color:var(--ink);font:400 14px var(--display);cursor:pointer;
+    transition:background .12s,border-color .12s}
+  button:disabled{opacity:.35;cursor:not-allowed}
+  button:not(:disabled):hover{background:#31412a;border-color:var(--gold)}
+  #btnReset{margin-top:10px;font:400 12px var(--ui);color:var(--dim);background:transparent}
+
+  /* 기여도 */
+  #contrib{position:absolute;left:50%;transform:translateX(-50%);top:12px;width:270px;
+    background:rgba(18,24,15,.9);border:1px solid #5c3128;border-radius:5px;padding:10px;display:none}
+  #contribTitle{font:400 15px/1 var(--display);color:var(--danger);margin-bottom:8px}
+  .crow{display:flex;align-items:center;gap:8px;font-size:11px;margin-bottom:5px}
+  .crow span{width:54px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .crow b{width:36px;text-align:right;font:600 11px var(--mono);font-variant-numeric:tabular-nums}
+  .cbar{flex:1;height:8px;background:#0a0f08;border-radius:2px;overflow:hidden}
+  .cbar i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--danger));transition:width .2s}
+
+  #toast{position:absolute;left:50%;transform:translateX(-50%);bottom:78px;display:none;
+    background:rgba(18,24,15,.94);border:1px solid;border-radius:4px;padding:8px 14px;font-size:12px}
+
+  /* 이동 패드 */
+  @media (pointer:fine){ .pad{display:none} }   /* 키보드가 있으면 패드는 자리만 잡아먹는다 */
+  .pad{position:absolute;bottom:14px;width:64px;height:64px;border-radius:4px;
+    background:rgba(35,47,28,.6);border:1px solid var(--line);display:grid;place-items:center;
+    font-size:22px;color:#cfe0c4;user-select:none;touch-action:none}
+  .pad:active{background:rgba(47,61,38,.85)}
+  #padL{left:14px} #padR{left:88px}
+
+  /* 채팅 */
+  #chat{height:124px;display:flex;flex-direction:column;background:var(--panel);border-top:1px solid var(--line)}
+  #chatLog{flex:1;overflow-y:auto;padding:7px 12px;font-size:12px}
+  #chatLog div{margin-bottom:2px}
+  #chatLog b{color:var(--xp);margin-right:6px;font-weight:600}
+  #chatLog b.sys{color:var(--dim)}
+  #chatInput{border:0;border-top:1px solid var(--line);background:#0d1209;color:var(--ink);
+    padding:8px 12px;font:400 13px var(--ui);outline:none;flex:none}
+  #chatInput::placeholder{color:#5f7053}
+
+
+  /* ---------- 모바일 ----------
+     390px 폭에서 좌측 장비(3칸)와 우측 채널 패널이 겹친다.
+     장비는 칸을 좁히고, 기여도는 위쪽 경쟁을 피해 아래로 내린다. */
+  /* 로그인 */
+  #login{position:fixed;inset:0;z-index:20;background:var(--ground);display:grid;place-items:center;padding:16px}
+  .loginbox{width:min(360px,100%);display:flex;flex-direction:column;gap:9px}
+  .loginbox h1{margin:0;font:400 34px/1 var(--display);letter-spacing:.02em}
+  .tag{margin:0 0 6px;font-size:12px;color:var(--dim)}
+  #panelLogin,#panelSignup{display:flex;flex-direction:column;gap:9px}
+  .loginbox label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--dim);letter-spacing:.06em}
+  .loginbox input{background:#0d1209;border:1px solid var(--line);border-radius:4px;color:var(--ink);
+    padding:10px;font:400 16px var(--ui);outline:none}
+  .loginbox input:focus{border-color:var(--gold)}
+  .primary{background:var(--gold);color:#141a10;border-color:var(--gold);font:400 16px var(--display);padding:10px}
+  .primary:not(:disabled):hover{background:#ffdc86;border-color:#ffdc86}
+  .sso{font:400 13px var(--ui);color:var(--dim)}
+  .err{min-height:16px;font-size:12px;color:var(--danger)}
+  .note{margin:6px 0 0;font-size:11px;line-height:1.6;color:var(--dim)}
+  .note b{color:var(--gold);font:600 11px var(--mono)}
+
+  /* 스킬 바 */
+  #skillbar{position:absolute;left:50%;transform:translateX(-50%);bottom:12px;display:flex;gap:7px}
+  .sk{position:relative;width:52px;height:52px;border:1px solid var(--line);border-radius:5px;
+    background:rgba(18,24,15,.86);display:grid;place-items:center;overflow:hidden}
+  .sk .skn{font:400 12px/1.1 var(--display);text-align:center;padding:0 3px;position:relative;z-index:2}
+  .sk .cool{position:absolute;left:0;right:0;bottom:0;background:rgba(8,11,7,.78);z-index:3}
+  .sk .cds{position:absolute;inset:0;display:grid;place-items:center;z-index:4;
+    font:600 14px var(--mono);color:var(--gold);font-variant-numeric:tabular-nums}
+  .sk.ready{border-color:var(--gold);box-shadow:0 0 8px rgba(242,193,78,.28)}
+
+  /* 메뉴 */
+  #menuModal{position:absolute;inset:0;background:rgba(8,11,7,.72);display:grid;place-items:center;z-index:6}
+  .msec{margin-bottom:16px}
+  .msec h5{margin:0 0 7px;font-size:11px;color:var(--dim);letter-spacing:.1em}
+  .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:5px 0;border-bottom:1px solid var(--line)}
+  .kv b{font:500 12px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink)}
+  .skrow{display:flex;gap:9px;align-items:center;padding:6px 0;font-size:12px}
+  .skrow .lv{width:44px}
+  .skrow .nm{flex:1}
+  .skrow .st{font-size:11px;color:var(--dim)}
+  .skrow.locked{opacity:.42}
+  .btnrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:6px}
+  .btnrow button{width:auto;font:400 13px var(--ui);padding:7px 6px}
+  /* 레벨은 증감과 바로가기를 갈라 놔야 같은 버튼이 겹쳐 보이지 않는다 */
+  .lvctl{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+  .lvctl button{width:46px;padding:9px 0;font:600 14px var(--mono)}
+  .lvnow{flex:1;text-align:center;font:400 26px/1 var(--display);color:var(--gold);
+    font-variant-numeric:tabular-nums}
+  .lvnow small{display:block;font:400 10px var(--ui);color:var(--dim);letter-spacing:.1em;margin-top:3px}
+  .danger{border-color:#5c3128;color:#ff9f9f}
+  .danger:not(:disabled):hover{background:#3a201c;border-color:var(--danger)}
+  table.roster{width:100%;border-collapse:collapse;font-size:11px}
+  table.roster th{text-align:left;color:var(--dim);font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line)}
+  table.roster td{padding:4px 6px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  table.roster td.me{color:var(--gold)}
+
+  /* 가방 */
+  #bagModal{position:absolute;inset:0;background:rgba(8,11,7,.72);display:grid;place-items:center;z-index:5}
+  .bagbox{width:min(520px,calc(100% - 24px));max-height:calc(100% - 24px);display:flex;flex-direction:column;
+    background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .bagbox header{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line)}
+  .bagbox h3{margin:0;font:400 19px/1 var(--display)}
+  .bhint{flex:1;font-size:11px;color:var(--dim)}
+  .bx{width:auto;padding:5px 11px;font:400 13px var(--ui)}
+  #bagBody{overflow-y:auto;padding:10px 12px 14px}
+  .bsec{margin-bottom:14px}
+  .bsec h5{margin:0 0 6px;font-size:11px;color:var(--dim);letter-spacing:.1em}
+  .bitem{display:flex;align-items:center;gap:10px;padding:7px 9px;margin-bottom:5px;
+    background:var(--raise);border:1px solid var(--line);border-left-width:3px;border-radius:4px;
+    cursor:pointer;transition:background .12s}
+  .bitem:hover{background:#31412a}
+  .bitem.on{cursor:default;background:#1a2415}
+  .bitem.on:hover{background:#1a2415}
+  .bimg{width:30px;height:30px;flex:none;image-rendering:pixelated;object-fit:contain}
+  .binfo{flex:1;min-width:0}
+  .bname{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bspec{font:500 11px var(--mono);color:var(--dim);font-variant-numeric:tabular-nums}
+  .bdelta{font:600 12px var(--mono);font-variant-numeric:tabular-nums;flex:none}
+  .up{color:var(--hp)} .down{color:var(--danger)} .eqd{color:var(--gold);font-size:11px;font-family:var(--ui)}
+  .bempty{font-size:12px;color:var(--dim);padding:6px 2px}
+
+  @media (max-width:760px){
+    #hud{gap:8px;padding:7px 9px}
+    .who b{font-size:17px}
+    .bars{order:3;flex-basis:100%;min-width:0}
+    .stat{gap:10px;font-size:11px}
+    .stat b{font-size:12px}
+
+    #gear{left:8px;top:8px;gap:5px}
+    .slot{min-width:0;padding:5px 6px;flex:1}
+    .sname{font-size:9px}
+    .sval{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .sstat{font-size:9px}
+    #gear{max-width:calc(100% - 148px)}
+
+    #channel{right:8px;top:8px;width:132px;padding:8px}
+    #channel h4{font-size:14px;margin-bottom:6px}
+    .crow2{font-size:11px;margin-bottom:4px}
+    .glabel{font-size:10px}
+    button{padding:7px 4px;font-size:12px}
+
+    /* 기여도는 위가 이미 꽉 차서 아래로 내린다. 이동 패드보다 위. */
+    #contrib{top:auto;bottom:88px;width:calc(100% - 20px);max-width:340px}
+    /* 이동 패드가 왼쪽 아래를 쓰므로 획득 알림은 오른쪽 아래로 비킨다 */
+    #toast{left:auto;right:8px;transform:none;bottom:12px;max-width:calc(100% - 150px)}
+
+    /* 화면이 좁아 자리를 나눠 쓴다.
+       좌하단 = 이동 패드, 그 위 = 가방·메뉴, 우하단 = 스킬바, 우상단 = 채널.
+       스킬바를 우상단에 두었더니 채널 패널의 소환 버튼을 통째로 덮었다. */
+        #skillbar{left:auto;right:8px;bottom:10px;transform:none;
+      flex-wrap:wrap;justify-content:flex-end;gap:5px;
+      max-width:calc(100% - 152px)}          /* 152px = 이동 패드가 쓰는 폭 */
+    .sk{width:38px;height:38px}
+    .sk .skn{font-size:9px}
+    .sk .cds{font-size:13px}
+
+    /* 채널 패널을 낮춰 스킬바와 안 만나게 한다 */
+    #channel{width:126px;padding:7px}
+    #channel h4{font-size:13px;margin-bottom:5px}
+    .gtrack{height:6px;margin:3px 0 6px}
+
+    #contrib{bottom:70px}
+    #toast{left:8px;right:8px;bottom:116px;transform:none;max-width:none;text-align:center}
+    .loginbox h1{font-size:28px}
+    .bagbox{width:calc(100% - 16px)}
+    #chat{height:104px}
+    #chatLog{font-size:11px;padding:6px 9px}
+    #chatInput{padding:9px;font-size:16px}   /* 16px 미만이면 iOS 가 입력 시 화면을 확대한다 */
+    .pad{width:56px;height:56px;bottom:10px}
+    #padL{left:10px} #padR{left:74px}
+  }
+
+  /* 가로로 눕힌 폰 — 세로가 짧아 화면이 다 먹힌다 */
+  @media (max-height:480px){
+    #chat{height:78px}
+    #hud{padding:5px 9px}
+    #contrib{bottom:74px}
+  }
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div id="wrap">
+
+  <div id="hud">
+    <div class="who">
+      <b id="hudName">모험가</b><span class="lv" id="hudLevel">Lv.1</span>
+      <span class="mode auto" id="hudMode">자동</span>
+    </div>
+    <div class="bars">
+      <div class="track"><i id="hpFill" style="background:var(--hp);width:100%"></i><span id="hpText">0 / 0</span></div>
+      <div class="track"><i id="xpFill" style="background:var(--xp);width:0"></i><span id="xpText">0 / 0</span></div>
+    </div>
+    <div class="stat">
+      <span>공격 <b id="hudAtk">0</b></span>
+      <span>방어 <b id="hudDef">0</b></span>
+      <span>골드 <b id="hudGold">0</b></span>
+      <span>처치 <b id="hudKills">0</b></span>
+    </div>
+    <div class="hudbtns">
+      <button id="btnBag">가방 <b id="bagCount">0</b></button>
+      <button id="btnMenu">메뉴</button>
+    </div>
+  </div>
+
+  <div id="stage">
+    <canvas id="game"></canvas>
+    <div id="gear"></div>
+
+    <div id="channel">
+      <h4>채널 <span id="chId">1</span></h4>
+      <div class="crow2"><span>인원</span><b id="chMembers">1 / 5</b></div>
+      <div class="crow2"><span>채널 누적 처치</span><b id="chKills">0</b></div>
+      <div class="glabel"><span>중간보스</span><b>100</b></div>
+      <div class="gtrack"><i id="gSenator"></i></div>
+      <button id="btnSenator" disabled>중간보스 소환</button>
+      <div class="glabel" style="margin-top:8px"><span>최종보스</span><b>300</b></div>
+      <div class="gtrack"><i id="gPooh"></i></div>
+      <button id="btnPooh" disabled>최종보스 소환</button>
+    </div>
+
+    <div id="contrib">
+      <div id="contribTitle">기여도</div>
+      <div id="contribList"></div>
+    </div>
+
+    <div id="skillbar"></div>
+
+    <div id="bagModal" hidden>
+      <div class="bagbox" role="dialog" aria-label="가방">
+        <header>
+          <h3>가방</h3>
+          <span class="bhint">칸을 누르면 장착한다</span>
+          <button id="bagClose" class="bx">닫기</button>
+        </header>
+        <div id="bagBody"></div>
+      </div>
+    </div>
+
+    <div id="menuModal" hidden>
+      <div class="bagbox" role="dialog" aria-label="메뉴">
+        <header>
+          <h3>메뉴</h3>
+          <span class="bhint" id="menuWho"></span>
+          <button id="menuClose" class="bx">닫기</button>
+        </header>
+        <div id="menuBody"></div>
+      </div>
+    </div>
+
+    <div id="toast"></div>
+    <div class="pad" id="padL">◀</div>
+    <div class="pad" id="padR">▶</div>
+  </div>
+
+  <div id="login">
+    <div class="loginbox">
+      <h1>방치의 숲</h1>
+
+      <div id="panelLogin">
+        <p class="tag">아이디와 비밀번호를 넣는다</p>
+        <label>아이디<input id="liId" autocomplete="username" placeholder="아이디"></label>
+        <label>비밀번호<input id="liPw" type="password" autocomplete="current-password" placeholder="비밀번호"></label>
+        <div id="liErr" class="err"></div>
+        <button id="liGo" class="primary">로그인</button>
+        <button id="goSignup">회원가입</button>
+        <button id="liSso" class="sso" disabled>Google 계정으로 계속 (준비 중)</button>
+        <p class="note">
+          계정은 이 브라우저에만 저장된다. 서버가 붙기 전까지의 임시 방식이라 보안 수단이 아니다.
+        </p>
+      </div>
+
+      <div id="panelSignup" hidden>
+        <p class="tag">캐릭터 이름은 필드에서 다른 사람에게 보인다</p>
+        <label>캐릭터 이름<input id="suName" maxlength="10" placeholder="1~10자"></label>
+        <label>아이디<input id="suId" autocomplete="username" placeholder="영문·숫자·밑줄, 3자 이상"></label>
+        <label>비밀번호<input id="suPw" type="password" autocomplete="new-password" placeholder="4자 이상"></label>
+        <div id="suErr" class="err"></div>
+        <button id="suGo" class="primary">계정 만들기</button>
+        <button id="goLogin">로그인으로 돌아가기</button>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="chat">
+    <div id="chatLog"></div>
+    <input id="chatInput" placeholder="Enter 로 채팅 (채널 전체에게 보인다)" maxlength="120" autocomplete="off">
+  </div>
+
+</div>
+
+<script src="core.js"></script>
+<script src="auth.js"></script>
+<script src="sprites.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
