@@ -75,6 +75,11 @@
   button:disabled{opacity:.35;cursor:not-allowed}
   button:not(:disabled):hover{background:#31412a;border-color:var(--gold)}
   #btnReset{margin-top:10px;font:400 12px var(--ui);color:var(--dim);background:transparent}
+  /* 채널 이동 UI. 드레인이랑 같은 이관 경로를 버튼으로 직접 태우는 것 */
+  #chSwitch{display:flex;gap:4px;margin:2px 0 8px}
+  #chSwitch select{flex:1;min-width:0;background:#0d1209;color:var(--ink);border:1px solid var(--line);
+    border-radius:4px;font:400 12px var(--mono);padding:4px}
+  #chSwitch button{width:auto;padding:4px 10px;font-size:12px;flex:none}
 
   /* 기여도 */
   #contrib{position:absolute;left:50%;transform:translateX(-50%);top:12px;width:270px;
@@ -283,6 +288,10 @@
       <h4>채널 <span id="chId">1</span></h4>
       <div class="crow2"><span>인원</span><b id="chMembers">1 / 5</b></div>
       <div class="crow2"><span>채널 누적 처치</span><b id="chKills">0</b></div>
+      <div id="chSwitch">
+        <select id="chPick"><option value="">채널…</option></select>
+        <button id="btnSwitch">이동</button>
+      </div>
       <div class="glabel"><span>중간보스</span><b>100</b></div>
       <div class="gtrack"><i id="gSenator"></i></div>
       <button id="btnSenator" disabled>중간보스 소환</button>

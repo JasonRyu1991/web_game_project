@@ -5,19 +5,33 @@ const C = window.Core;
 const SP = window.Sprites;
 
 /* ---------- 저장소 ---------- */
-// DB 가 있다는 가정. 실제 저장은 채널 파드 → Cloud SQL 로 간다.
-// 지금은 localStorage 로 흉내만 내되, 인터페이스를 async 로 맞춰 두어
-// 나중에 fetch 로 바꿀 때 호출부를 안 고치게 한다.
-// ponytail: localStorage 어댑터. 서버 붙으면 load/save 본문만 fetch 로 교체.
+// 세이브는 채널 파드 → Cloud SQL 로 간다. /save/<계정id> 엔드포인트.
+// 서버가 없거나(file://) DB 가 안 붙었으면 load 가 null 을 주고, 게임은 새 세이브로 시작한다.
+// localStorage 는 서버 저장이 실패했을 때만 쓰는 임시 백업(다음 접속에서 서버가 살아있으면 서버 값이 이긴다).
 const Store = {
-  key: null,                     // 계정마다 다른 칸을 쓴다
-  use(id) { this.key = 'field_save_v1:' + id; },
+  id: null,
+  key: null,
+  use(id) { this.id = id; this.key = 'field_save_v1:' + id; },
   async load() {
-    try { return JSON.parse(localStorage.getItem(this.key)) || null; } catch { return null; }
+    try {
+      const r = await fetch(`/save/${encodeURIComponent(this.id)}`);
+      if (r.ok) {
+        const j = await r.json();
+        if (j.data) return j.data;
+      }
+    } catch {}
+    try { return JSON.parse(localStorage.getItem(this.key)) || null; } catch { return null; } // 서버 실패 시 로컬 백업
   },
   async save(data) {
     data.savedAt = Date.now();
     try { localStorage.setItem(this.key, JSON.stringify(data)); } catch {}
+    try {
+      await fetch(`/save/${encodeURIComponent(this.id)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    } catch {}
   },
 };
 
@@ -988,8 +1002,9 @@ function renderHud() {
   $('hudMode').className = 'mode ' + (p.auto ? 'auto' : 'manual');
 
   $('chKills').textContent = state.channel.kills;
-  const mt = C.channelMetrics(state.players);
-  $('chMembers').textContent = `${mt.active_players} / ${C.CHANNEL_CAP}`;
+  // 서버에 붙어 있으면 채널 인원은 서버 roster 가 정답(봇 포함). 혼자 모드면 로컬 카운트.
+  const members = Net.connected ? Net.roster.length : state.players.length;
+  $('chMembers').textContent = `${members} / ${C.CHANNEL_CAP}`;
   gauge('gSenator', state.channel.kills, C.SUMMON_KILLS.senator);
   gauge('gPooh', state.channel.kills, C.SUMMON_KILLS.pooh);
   $('btnSenator').disabled = !state.summonReady.senator;
@@ -1128,8 +1143,12 @@ function renderMenu() {
       ${Auth.roster().map(r => `<tr>
         <td class="${r.id === acc.id ? 'me' : ''}">${r.name}</td><td>${r.id}</td><td>${r.role}</td>
         <td>${r.level || '-'}</td><td>${(r.kills || 0).toLocaleString()}</td></tr>`).join('')}</table></div>
-      <div class="kv" style="margin-top:8px"><span>이 채널 접속자</span><b>${state.players.length} / ${C.CHANNEL_CAP}</b></div>
-      ${state.players.map(pl => `<div class="kv"><span>${pl.name}</span><b>Lv.${pl.level}</b></div>`).join('')}
+      ${(() => {
+        // 서버 붙어 있으면 채널 접속자는 서버 roster(봇 포함), 아니면 로컬.
+        const list = Net.connected ? Net.roster : state.players.map(p => ({ name: p.name, level: p.level }));
+        return `<div class="kv" style="margin-top:8px"><span>이 채널 접속자</span><b>${list.length} / ${C.CHANNEL_CAP}</b></div>` +
+          list.map(pl => `<div class="kv"><span>${pl.name}</span><b>Lv.${pl.level}</b></div>`).join('');
+      })()}
     </div>` : '';
 
   const acts = `<div class="msec"><h5>계정</h5>
@@ -1190,15 +1209,12 @@ function bindAdmin() {
   on('#admGod', () => { state.god = !state.god; toast(state.god ? '무적' : '무적 해제', '#ff2e63'); after(); });
   on('#admCool', () => { state.me.cds = {}; renderSkillbar(); });
   on('#admHeal', () => { state.me.hp = state.me.maxHp; state.me.dead = 0; });
+  // 서버측 봇을 늘리고 줄인다 → 채널 인원(roster)과 KEDA 지표에 실제로 잡힌다.
   on('#admAdd', () => {
-    if (state.players.length >= C.CHANNEL_CAP) { toast('채널 정원이 찼다', '#ff2e63'); return; }
-    state.players.push(makePlayer('동료' + state.players.length, false, state.me.level, 'bot_' + state.seq++));
-    after();
+    if (!Net.bot(1)) toast('서버에 연결돼 있지 않다', '#ff2e63');
   });
   on('#admDrop', () => {
-    const i = state.players.findIndex(p => !p.isMe);
-    if (i >= 0) state.players.splice(i, 1);
-    after();
+    if (!Net.bot(-1)) toast('서버에 연결돼 있지 않다', '#ff2e63');
   });
 }
 
@@ -1282,6 +1298,7 @@ const escapeHtml = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', 
 
 chatInput.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
+  if (e.isComposing || e.keyCode === 229) return; // 한글 조합 확정용 Enter — 이때 보내면 "젓가락" 이 "락" 처럼 조각나 전송된다
   const v = chatInput.value.trim();
   // 서버에 붙어 있으면 채널 전체에 방송한다. 방송한 내용은 서버가 되돌려 주므로
   // 여기서 따로 그리지 않는다 — 안 그러면 자기 말만 두 번 보인다.
@@ -1352,8 +1369,9 @@ async function boot() {
   $('suGo').onclick = submitSignup;
   $('goSignup').onclick = () => showPanel('signup');
   $('goLogin').onclick = () => showPanel('login');
-  for (const id of ['liId', 'liPw']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') submitLogin(); });
-  for (const id of ['suName', 'suId', 'suPw']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') submitSignup(); });
+  const onEnter = fn => e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) fn(); }; // 한글 조합 중 Enter 무시
+  for (const id of ['liId', 'liPw']) $(id).addEventListener('keydown', onEnter(submitLogin));
+  for (const id of ['suName', 'suId', 'suPw']) $(id).addEventListener('keydown', onEnter(submitSignup));
   const cur = Auth.current();
   if (cur) startGame(cur); else showPanel('login');
 }
@@ -1378,11 +1396,8 @@ async function startGame(acc) {
   state.players = [state.me];
   if (acc.role === 'admin') grantAllGear(true);
 
-  // 같은 채널의 다른 유저. 서버가 붙으면 이 배열이 WS 로 채워진다.
-  // ponytail: 로컬 더미 2명. 기여도·채널 인원 UI 를 지금 검증하려고 둔 것이고, 서버 붙으면 삭제.
-  for (const nm of ['동료A', '동료B']) {
-    state.players.push(makePlayer(nm, false, Math.max(1, state.save.level + (Math.random() < .5 ? -1 : 1)), 'bot_' + nm));
-  }
+  // 다른 유저는 서버 roster 로만 카운트한다(캐릭터 렌더링은 이 프로젝트 범위 밖).
+  // 채널 인원·포화 테스트는 관리자 메뉴 "동료 추가" 로 서버측 봇을 늘려서 한다.
 
   fit();
   addEventListener('resize', fit);
@@ -1403,9 +1418,50 @@ async function startGame(acc) {
   Net.on.chat = m => say(m.who, m.text);
   Net.on.system = m => say('시스템', m.text);
   Net.on.drain = m => say('시스템', m.text + ' (다른 채널로 옮겨질 예정)');
-  Net.on.full = m => say('시스템', `채널이 가득 찼다 (정원 ${m.cap}명)`);
-  Net.on.roster = list => { $('chMembers').textContent = `${list.length} / ${C.CHANNEL_CAP}`; };
-  Net.connect(state.save.name, state.save.level);
+  Net.on.full = m => say('시스템', m.text || `채널이 가득 찼다 (정원 ${m.cap}명)`);
+  Net.on.roster = list => {
+    $('chMembers').textContent = `${list.length} / ${C.CHANNEL_CAP}`;
+    if (Net.index != null) { $('chId').textContent = Net.index; state.channel.id = Net.index; }
+  };
+  // 서버가 "저 채널로 옮겨라" 고 하면(수동 이동이든 드레인이든) net.js 가 알아서 재접속한다. 여기선 안내만.
+  Net.on.transferring = m => say('시스템', m.reason === 'drain'
+    ? '채널이 닫혀서 다른 채널로 옮기는 중…'
+    : `${m.to}번 채널로 이동 중…`);
+  // 넘어온 내 상태를 그대로 이어붙인다. 좌표·현재체력·쿨타임까지 복원돼서 화면이 안 끊긴다.
+  Net.on.resume = t => {
+    if (!C.applyTransfer(state.me, t)) return;
+    state.save.level = state.me.level;
+    state.save.exp = state.me.exp;
+    state.save.equip = state.me.equip;
+    refreshMax(state.me);
+    renderGear();
+    renderSkillbar();
+    persist();
+    say('시스템', '상태를 이어받았다.');
+  };
+
+  Net.connect(state.save.name, state.save.level, {
+    id: state.account.id,
+    getSnapshot: () => C.transferState(state.me),   // 1초마다 서버로 보낼 "지금 내 상태"
+  });
+
+  // 채널 패널의 드롭다운을 redis 명부로 채운다. 파드가 늘면 여기도 자동으로 늘어난다.
+  async function refreshChannels() {
+    try {
+      const d = await (await fetch('/channels')).json();
+      $('chPick').innerHTML = '<option value="">채널…</option>' + (d.channels || [])
+        .map(c => `<option value="${c.index}"${c.index === Net.index ? ' disabled' : ''}>${c.index}번 (${c.players}/${d.cap})${c.draining ? ' 닫는중' : c.full ? ' 만원' : ''}</option>`)
+        .join('');
+    } catch {}
+  }
+  $('btnSwitch').onclick = () => {
+    if (!$('chPick').value) return;
+    if (!Net.switchChannel(Number($('chPick').value))) say('시스템', '서버에 연결돼 있지 않다.');
+  };
+  refreshChannels();
+  setInterval(refreshChannels, 5000);   // 명부 하트비트가 5초라 그에 맞춘다
+
+  persist();   // 세이브 행을 바로 만들어 둔다 — chats 테이블 FK(saves.user_id)가 이걸 필요로 한다
 
   say('시스템', `${state.save.name} 님, 채널 ${state.channel.id} 입장. 정원 ${C.CHANNEL_CAP}명. 5초간 조작이 없으면 자동 사냥으로 전환된다.`);
   requestAnimationFrame(frame);
