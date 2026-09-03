@@ -1124,10 +1124,10 @@ function renderMenu() {
       </div></div>
 
     <div class="msec"><h5>접속자 현황</h5>
-      <table class="roster"><tr><th>캐릭터</th><th>계정</th><th>권한</th><th>레벨</th><th>처치</th></tr>
+      <div class="rosterwrap"><table class="roster"><tr><th>캐릭터</th><th>계정</th><th>권한</th><th>레벨</th><th>처치</th></tr>
       ${Auth.roster().map(r => `<tr>
         <td class="${r.id === acc.id ? 'me' : ''}">${r.name}</td><td>${r.id}</td><td>${r.role}</td>
-        <td>${r.level || '-'}</td><td>${(r.kills || 0).toLocaleString()}</td></tr>`).join('')}</table>
+        <td>${r.level || '-'}</td><td>${(r.kills || 0).toLocaleString()}</td></tr>`).join('')}</table></div>
       <div class="kv" style="margin-top:8px"><span>이 채널 접속자</span><b>${state.players.length} / ${C.CHANNEL_CAP}</b></div>
       ${state.players.map(pl => `<div class="kv"><span>${pl.name}</span><b>Lv.${pl.level}</b></div>`).join('')}
     </div>` : '';
@@ -1283,7 +1283,9 @@ const escapeHtml = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', 
 chatInput.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
   const v = chatInput.value.trim();
-  if (v) say(state.me.name, v);          // 서버 붙으면 여기서 WS 로 채널 전체에 방송한다
+  // 서버에 붙어 있으면 채널 전체에 방송한다. 방송한 내용은 서버가 되돌려 주므로
+  // 여기서 따로 그리지 않는다 — 안 그러면 자기 말만 두 번 보인다.
+  if (v && !Net.chat(v)) say(state.me.name, v);   // 혼자 모드면 로컬로만 표시
   chatInput.value = '';
   chatInput.blur();
 });
@@ -1398,6 +1400,13 @@ async function startGame(acc) {
   renderGear();
   renderSkillbar();
   checkSummon();
+  Net.on.chat = m => say(m.who, m.text);
+  Net.on.system = m => say('시스템', m.text);
+  Net.on.drain = m => say('시스템', m.text + ' (다른 채널로 옮겨질 예정)');
+  Net.on.full = m => say('시스템', `채널이 가득 찼다 (정원 ${m.cap}명)`);
+  Net.on.roster = list => { $('chMembers').textContent = `${list.length} / ${C.CHANNEL_CAP}`; };
+  Net.connect(state.save.name, state.save.level);
+
   say('시스템', `${state.save.name} 님, 채널 ${state.channel.id} 입장. 정원 ${C.CHANNEL_CAP}명. 5초간 조작이 없으면 자동 사냥으로 전환된다.`);
   requestAnimationFrame(frame);
 }

@@ -1,0 +1,17 @@
+# 이미지에 들어가면 안 되는 것들.
+# node_modules 는 특히 중요 — 맥에서 설치된 것이 alpine 리눅스에서 안 도는 경우가 있어서,
+# 복사해 넣지 말고 컨테이너 안에서 npm ci 로 새로 받아야 한다.
+node_modules/
+npm-debug.log
+
+.git/
+.gitignore
+
+# 개발용이라 실행에 필요 없다
+test.js
+README.md
+
+# 혹시 상위에서 빌드하더라도 인프라 코드가 딸려 들어가지 않게
+*.tf
+*.tfvars
+.terraform/

@@ -4,3 +4,4 @@ _trash/
 *.tfstate
 *.tfstate.*
 crash.log
+node_modules/

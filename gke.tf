@@ -5,6 +5,7 @@ resource "google_container_cluster" "web_game_cluster" {
   subnetwork               = google_compute_subnetwork.web_game_subnet.name
   remove_default_node_pool = true
   initial_node_count       = 1
+  deletion_protection = false #이거 안해주면 destroy가 안되더라...
 
   ip_allocation_policy {
     cluster_secondary_range_name  = "gke-pods"
@@ -26,7 +27,6 @@ resource "google_container_cluster" "web_game_cluster" {
     create = "30m"
     update = "40m"
   }
-
   # network/subnetwork/node_config 는 GCP 표현 방식 차이와 삭제된 기본
   # 노드풀의 흔적 때문에 매번 클러스터 재생성으로 오탐지되어 무시한다.
   lifecycle {
