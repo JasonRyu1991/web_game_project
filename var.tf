@@ -18,3 +18,9 @@ variable "node_count" {
   type        = number
   default     = 3
 }
+
+variable "db_password" {
+  description = "PostgreSQL 데이터베이스 비밀번호"
+  type        = string
+  sensitive   = true
+}
