@@ -1,0 +1,29 @@
+#KEDA 가 채널 파드 수를 active_players 합계에 맞춰 2~5 사이에서 조절한다.
+#이 프로젝트의 명제는 스케일"인" 이다 — 한가해지면 채널을 닫되 접속자를 안 튕기고 다른 채널로 넘긴다.
+#그 "닫는" 동작을 KEDA 가 트리거하고, 실제 이관은 server.js 의 SIGTERM 드레인이 한다.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: channel
+spec:
+  scaleTargetRef:
+    kind: StatefulSet
+    name: channel
+  minReplicaCount: 1 #0번(홈 채널)은 main_channel.yaml 이 항상 띄우므로 sub 는 최소 1개면 된다(1번 채널)
+  maxReplicaCount: 4 #sub 는 1~4번. 0번까지 합치면 최대 5채널
+  pollingInterval: 15 #15초마다 /scale 을 확인
+  cooldownPeriod: 60 #마지막 스케일 후 60초는 다시 안 건드린다. 데모라 짧게 잡음(실서비스면 더 길게)
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 60 #줄일 때 60초 평균을 봐서 깜빡임을 막는다
+  triggers:
+    - type: metrics-api
+      metadata:
+        #헤드리스 Service 라 살아있는 파드 아무거나로 간다. 어느 파드가 받아도 redis 명부를 봐서 같은 값을 준다.
+        url: "http://channel.default.svc.cluster.local:8080/scale"
+        valueLocation: "total_players"
+        #metrics-api 는 기본이 AverageValue 라 KEDA 가 total_players / 현재파드수 를 이 값과 비교한다.
+        #targetValue 3 = "채널당 평균 3명" 을 노린다. 7명이면 ceil(7/3)=3채널, 13명이면 5채널(상한).
+        targetValue: "3"

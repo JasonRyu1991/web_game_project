@@ -1,66 +1,41 @@
-# 인터넷 → 클러스터로 들어오는 정문.
-#
-# Ingress 는 "이런 LB 하나 만들어줘" 라는 주문서다. 이거 하나 올리면 GKE 가
-# NEG · 백엔드서비스 · 헬스체크 · URL맵 · 타겟HTTPS프록시 · 글로벌 포워딩규칙을
-# 알아서 다 만든다. network.tf 의 LB 4종이 주석으로 남아 있는 이유가 이것 —
-# 같은 물건이라 둘 다 켜면 LB 가 2개($36.5/월)가 된다. 주석 해제하지 말 것.
-#
-# 인증서(web-game-cert)가 지금 FAILED_NOT_VISIBLE 인 이유는 고정 IP 136.69.60.240 에
-# 아무 LB 도 안 붙어 있어서다. Google 은 계속 재시도 중이고, 이 Ingress 가 그 IP 를
-# 잡는 순간 다음 재시도에서 검증이 통과한다(PROVISIONING → ACTIVE, 10분~수시간).
-
+#Ingress 는 "LB 하나 만들어줘" 라는 주문서다. 이거 올리면 GKE 가 NEG·백엔드·URL맵·프록시·포워딩규칙을 알아서 다 만든다.
+#network.tf 의 LB 4종을 주석으로 남겨둔 이유가 이것. 같은 물건이라 둘 다 켜면 LB 가 2개(월 $36.5)가 된다.
 apiVersion: cloud.google.com/v1
 kind: BackendConfig
 metadata:
   name: channel-backend
 spec:
-  # GCP LB 백엔드 timeout 기본값은 30초다. 안 늘리면 WebSocket 이 30초마다 끊긴다.
-  # 이 프로젝트에서는 단순 버그가 아니라 명제 자체가 성립을 안 하게 되는 값.
-  timeoutSec: 3600
-
-  # 헬스체크 경로를 반드시 /healthz 로 박는다.
-  # 기본값(/)으로 두면 드레인 중인 파드도 index.html 을 200 으로 돌려주기 때문에
-  # LB 가 "얘 멀쩡하네" 하고 신규 트래픽을 계속 보낸다 → 드레인이 무의미해진다.
+  timeoutSec: 3600 #GCP LB 기본값이 30초다. 안 늘리면 WebSocket 이 30초마다 끊긴다
   healthCheck:
     type: HTTP
-    requestPath: /healthz
+    requestPath: /healthz #기본값(/)으로 두면 드레인중인 파드도 index.html 을 200 으로 줘서 LB 가 계속 트래픽을 보낸다
     port: 8080
     checkIntervalSec: 5
     timeoutSec: 3
     healthyThreshold: 1
     unhealthyThreshold: 2
-
-  # LB 쪽 커넥션 드레이닝. 파드의 terminationGracePeriodSeconds(660)와 맞춘다.
   connectionDraining:
-    drainingTimeoutSec: 660
+    drainingTimeoutSec: 660 #파드쪽 terminationGracePeriodSeconds 와 맞춰둔다
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: channel
   annotations:
-    # ① 반드시 기존 고정 IP 를 쓰게 강제한다. 이 줄이 없으면 Ingress 가 새 임시 IP 를
-    #    뽑아버리고, A레코드(1bit.kr → 136.69.60.240)와 어긋나 인증서가 영영 안 나온다.
-    kubernetes.io/ingress.global-static-ip-name: "web-game-static-ip"   # dns.tf:8
-
-    # ② Terraform 이 만든 인증서를 이름으로 빌려 쓴다. 소유권은 Terraform 에 그대로 남는다.
-    #    (GKE 의 ManagedCertificate CRD 를 쓰면 인증서가 2개가 되고 관리 주체가 갈린다)
-    ingress.gcp.kubernetes.io/pre-shared-cert: "web-game-cert"          # dns.tf:12
-
-    # ③ HTTP(80)는 끄지 않는다. 관리형 인증서 검증 경로에 영향을 줄 수 있다.
-    kubernetes.io/ingress.allow-http: "true"
+    #ingressClassName: gce 를 쓰려면 클러스터에 gce IngressClass 리소스가 있어야 하는데 이 클러스터엔 없다(destroy/recreate 여파).
+    #이 구식 어노테이션은 그 리소스 없이도 GKE 컨트롤러가 인식한다. 이게 없으면 컨트롤러가 인그레스를 무시해서 ADDRESS 가 영영 안 붙는다.
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: "web-game-static-ip" #이 줄 없으면 Ingress 가 새 IP 를 뽑아버려서 A레코드랑 어긋나고 인증서가 영영 안 나온다
+    ingress.gcp.kubernetes.io/pre-shared-cert: "web-game-cert" #dns.tf 가 만든 인증서를 이름으로 빌려 쓴다. 소유권은 terraform 에 그대로 남는다
+    kubernetes.io/ingress.allow-http: "true" #끄지 말 것. 인증서 검증 경로에 영향을 줄 수 있다
 spec:
-  ingressClassName: gce
   rules:
     - host: 1bit.kr
       http:
         paths:
-          # 채널 지정 접속. /ch0 으로 온 손님은 channel-0 파드로만 간다.
-          #
-          # 주의: GKE Ingress(gce 클래스)에는 경로 재작성(rewrite)이 없다.
-          # 파드는 /ch0/core.js 를 그대로 받는다 → server.js 가 앞의 /ch0 을
-          # 떼어내야 정적 파일을 찾는다. 그 처리는 이번 세션에 server.js 로 넣는다.
-          # 지금 떠 있는 v1.2 이미지에는 아직 없으므로 /ch0 은 404 가 정상이다.
+          #채널 5개(KEDA max)만큼 경로를 미리 다 깔아둔다. 파드가 아직 안 뜬 채널(3,4번)은 백엔드가 비어서
+          #GKE 가 UNHEALTHY 로 표시하는데, KEDA 가 그 파드를 띄우는 순간 살아난다. Ingress 자체는 안 죽는다.
+          #GKE Ingress 는 경로 재작성이 없어서 파드가 /ch3/core.js 를 그대로 받는다 → server.js 가 앞의 /ch3 을 뗀다.
           - path: /ch0
             pathType: ImplementationSpecific
             backend: { service: { name: channel-0, port: { number: 8080 } } }
@@ -73,10 +48,23 @@ spec:
           - path: /ch1/*
             pathType: ImplementationSpecific
             backend: { service: { name: channel-1, port: { number: 8080 } } }
-  # 채널을 안 지정하고 그냥 1bit.kr 로 들어오면 0번 채널로 보낸다.
-  # v1.2 이미지로도 이 경로는 정상 동작하므로, 오늘 1단계의 스모크 테스트가 된다.
-  #
-  # ponytail: 진짜 서비스라면 여기가 matchmaker 로 가서 "안 찬 채널" 을 배정받아야 한다.
-  #   지금은 무조건 0번. 0번이 꽉 차면 클라이언트가 /channels 를 보고 다음 채널을 노크한다.
+          - path: /ch2
+            pathType: ImplementationSpecific
+            backend: { service: { name: channel-2, port: { number: 8080 } } }
+          - path: /ch2/*
+            pathType: ImplementationSpecific
+            backend: { service: { name: channel-2, port: { number: 8080 } } }
+          - path: /ch3
+            pathType: ImplementationSpecific
+            backend: { service: { name: channel-3, port: { number: 8080 } } }
+          - path: /ch3/*
+            pathType: ImplementationSpecific
+            backend: { service: { name: channel-3, port: { number: 8080 } } }
+          - path: /ch4
+            pathType: ImplementationSpecific
+            backend: { service: { name: channel-4, port: { number: 8080 } } }
+          - path: /ch4/*
+            pathType: ImplementationSpecific
+            backend: { service: { name: channel-4, port: { number: 8080 } } }
   defaultBackend:
-    service: { name: channel-0, port: { number: 8080 } }
+    service: { name: channel-0, port: { number: 8080 } } #채널 안 정하고 그냥 1bit.kr 로 오면 0번으로 보낸다

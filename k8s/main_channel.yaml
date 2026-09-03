@@ -1,0 +1,74 @@
+#0번 채널(홈 채널). 절대 안 죽어야 하는 기본 접속처라 온디맨드 core 노드에 못박는다.
+#defaultBackend(그냥 1bit.kr 로 접속)가 여기로 오므로, 이게 살아있으면 첫 접속은 항상 성공한다.
+#스케일 대상 아님 — 항상 딱 1개. 스팟에서 버스트되는 건 sub_channels.yaml(1~4번)이 맡는다.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: channel-main
+  labels: { app: channel-main }
+spec:
+  serviceName: channel-main
+  replicas: 1
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: { app: channel-main }
+  template:
+    metadata:
+      labels: { app: channel-main }
+    spec:
+      terminationGracePeriodSeconds: 660
+      nodeSelector:
+        pool: core #core 노드에만. 스팟 toleration 을 안 줬으므로 스팟에는 애초에 못 올라간다
+      containers:
+        - name: channel
+          image: asia-northeast3-docker.pkg.dev/personal-webgame-project/web-game-images/web-game:v1.10
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: CHANNEL_ID
+              valueFrom:
+                fieldRef: { fieldPath: metadata.name } #channel-main-0 → server.js 가 끝 숫자 0 을 채널 번호로 뽑는다
+            - name: REDIS_URL
+              value: "redis://redis:6379"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: DATABASE_URL }
+            - name: CHANNEL_BASES
+              value: "/ch0,/ch1,/ch2,/ch3,/ch4"
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: 8080 }
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: channel-main #StatefulSet 이 요구하는 헤드리스 Service
+spec:
+  clusterIP: None
+  selector: { app: channel-main }
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+#Ingress 의 /ch0 이 물고 있는 Service. 0번 채널 파드 하나만 가리킨다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: channel-0
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+    cloud.google.com/backend-config: '{"default": "channel-backend"}'
+spec:
+  selector:
+    statefulset.kubernetes.io/pod-name: channel-main-0 #main StatefulSet 의 파드 이름
+  ports:
+    - port: 8080
+      targetPort: 8080

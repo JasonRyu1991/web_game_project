@@ -1,0 +1,39 @@
+#채널 파드들이 같이 쓰는 공용 사물함. 두 가지 용도로만 쓴다.
+#①채널 명부(누가 살아있나) ②채널 옮길 때 플레이어 상태를 잠깐 맡아두는 곳.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels: { app: redis }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: redis }
+  template:
+    metadata:
+      labels: { app: redis }
+    spec:
+      nodeSelector:
+        pool: core #redis 는 무조건 core 노드(온디맨드). 스팟에 있다가 선점당하면 전 채널의 이관 사물함이 날아간다
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["--save", "", "--appendonly", "no"] #디스크 저장을 끈다. 여기 든 건 다 30초 안에 사라질 임시 데이터라 남길 이유가 없다
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 200m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  selector: { app: redis }
+  ports:
+    - port: 6379
+      targetPort: 6379
