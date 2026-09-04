@@ -27,8 +27,7 @@ resource "google_container_cluster" "web_game_cluster" {
     create = "30m"
     update = "40m"
   }
-  # network/subnetwork/node_config 는 GCP 표현 방식 차이와 삭제된 기본
-  # 노드풀의 흔적 때문에 매번 클러스터 재생성으로 오탐지되어 무시한다.
+  # GCP 표현 방식 차이로 매번 재생성으로 오탐 → 무시
   lifecycle {
     ignore_changes = [network, subnetwork, node_config]
   }

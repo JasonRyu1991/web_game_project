@@ -37,7 +37,7 @@ const Auth = {
     this.write(a);
   },
 
-  async signup(name, id, pw) {
+  async signup(name, id, pw, gender) {
     name = (name || '').trim();
     id = (id || '').trim();
     if (name.length < 1 || name.length > 10) return { err: '캐릭터 이름은 1~10자로 정한다' };
@@ -47,7 +47,8 @@ const Auth = {
     const a = this.all();
     if (a[id]) return { err: '이미 있는 아이디다' };
     if (Object.values(a).some(x => x.name === name)) return { err: '이미 쓰는 캐릭터 이름이다' };
-    a[id] = { id, name, pw: await this.hash(pw), role: 'user', createdAt: Date.now() };
+    a[id] = { id, name, pw: await this.hash(pw), role: 'user',
+              gender: gender === 'female' ? 'female' : 'male', createdAt: Date.now() };
     this.write(a);
     return { ok: a[id] };
   },

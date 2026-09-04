@@ -1,4 +1,4 @@
-resource "google_project_service" "apis" { #구글은 귀찮다. 일일이 프로젝트마다 api를 켜야한다.. 망할놈들
+resource "google_project_service" "apis" { # GCP는 프로젝트마다 API를 수동으로 켜야 함
   for_each = toset([
     "compute.googleapis.com",              # VPC·서브넷·방화벽·Router/NAT·고정IP·SSL인증서·LB
     "container.googleapis.com",             # GKE 클러스터·노드풀

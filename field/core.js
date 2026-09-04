@@ -35,16 +35,16 @@ const skillDamage = (s, atk) => Math.max(1, Math.round(atk * s.mult));
 /* ---------- 몬스터 ---------- */
 //minLv 는 개인이 아니라 "채널 안 최고 레벨" 기준이다. 고렙 한 명이 들어오면 저렙도 레어를 같이 본다.
 const MONSTERS = {
-  slime:     { name: '슬라임',    tier: 'basic',   minLv: 1,  weight: 30, hp: 24,    atk: 4,   exp: 10,    gold: 5,    speed: 22, w: 26, h: 22 },
-  rat:       { name: '쥐',        tier: 'basic',   minLv: 1,  weight: 26, hp: 32,    atk: 6,   exp: 13,    gold: 7,    speed: 38, w: 28, h: 18 },
-  boar:      { name: '멧돼지',    tier: 'basic',   minLv: 3,  weight: 18, hp: 60,    atk: 11,  exp: 22,    gold: 12,   speed: 44, w: 38, h: 26 },
-  bear:      { name: '곰',        tier: 'basic',   minLv: 6,  weight: 12, hp: 120,   atk: 20,  exp: 40,    gold: 22,   speed: 30, w: 40, h: 42 },
-  unicorn:   { name: '유니콘',    tier: 'rare',    minLv: 10, weight: 5,  hp: 320,   atk: 34,  exp: 120,   gold: 80,   speed: 52, w: 42, h: 40 },
-  sasquatch: { name: '새스쿼치',  tier: 'rare',    minLv: 10, weight: 4,  hp: 460,   atk: 44,  exp: 160,   gold: 105,  speed: 34, w: 42, h: 48 },
-  zombie:    { name: '좀비',      tier: 'rare',    minLv: 10, weight: 5,  hp: 380,   atk: 52,  exp: 145,   gold: 95,   speed: 18, w: 30, h: 40 },
-  veteran:   { name: '퇴역군인',  tier: 'unique',  minLv: 20, weight: 3,  hp: 1500,  atk: 90,  exp: 600,   gold: 420,  speed: 40, w: 34, h: 42 },
-  senator:   { name: '국회의원',  tier: 'midboss', minLv: 1,  weight: 0,  hp: 6000,  atk: 130, exp: 2600,  gold: 1800, speed: 26, w: 34, h: 44 },
-  pooh:      { name: '곰돌이 푸', tier: 'boss',    minLv: 1,  weight: 0,  hp: 24000, atk: 190, exp: 11000, gold: 7000, speed: 22, w: 48, h: 50 },
+  slime:     { name: '슬라임',    tier: 'basic',   minLv: 1,  weight: 30, hp: 24,    atk: 4,   exp: 10,    gold: 5,    speed: 22, w: 27, h: 21 },
+  rat:       { name: '쥐',        tier: 'basic',   minLv: 1,  weight: 26, hp: 32,    atk: 6,   exp: 13,    gold: 7,    speed: 38, w: 27, h: 18 },
+  boar:      { name: '멧돼지',    tier: 'basic',   minLv: 3,  weight: 18, hp: 60,    atk: 11,  exp: 22,    gold: 12,   speed: 44, w: 33, h: 30 },
+  bear:      { name: '곰',        tier: 'basic',   minLv: 6,  weight: 12, hp: 120,   atk: 20,  exp: 40,    gold: 22,   speed: 30, w: 29, h: 57 },
+  unicorn:   { name: '유니콘',    tier: 'rare',    minLv: 10, weight: 5,  hp: 320,   atk: 34,  exp: 120,   gold: 80,   speed: 52, w: 32, h: 52 },
+  sasquatch: { name: '새스쿼치',  tier: 'rare',    minLv: 10, weight: 4,  hp: 460,   atk: 44,  exp: 160,   gold: 105,  speed: 34, w: 31, h: 65 },
+  zombie:    { name: '좀비',      tier: 'rare',    minLv: 10, weight: 5,  hp: 380,   atk: 52,  exp: 145,   gold: 95,   speed: 18, w: 24, h: 51 },
+  veteran:   { name: '퇴역군인',  tier: 'unique',  minLv: 20, weight: 3,  hp: 1500,  atk: 90,  exp: 600,   gold: 420,  speed: 40, w: 28, h: 51 },
+  senator:   { name: '국회의원',  tier: 'midboss', minLv: 1,  weight: 0,  hp: 6000,  atk: 130, exp: 2600,  gold: 1800, speed: 26, w: 26, h: 57 },
+  pooh:      { name: '곰돌이 푸', tier: 'boss',    minLv: 1,  weight: 0,  hp: 24000, atk: 190, exp: 11000, gold: 7000, speed: 22, w: 38, h: 63 },
 };
 
 const SUMMON_KILLS = { senator: 100, pooh: 300 };   //채널 전체가 같이 채운다. 이게 협력하는 이유다
@@ -192,12 +192,11 @@ function applyTransfer(p, t) {
 }
 
 /* ---------- 채널 지표 ---------- */
-//KEDA 랑 pod-deletion-cost 가 같은 값을 봐야 한다. 두 군데서 따로 세면 엉뚱한 채널이 닫힌다.
+//KEDA metrics-api 스케일러가 /scale 에서 읽어가는 값. 채널 하나 기준 인원·정원 도달 여부.
 function channelMetrics(players) {
   const active = players.length;
   return {
-    active_players: active,     ///metrics 로 노출해서 KEDA 가 읽어간다
-    deletion_cost: active,      //파드에 붙이는 controller.kubernetes.io/pod-deletion-cost 값
+    active_players: active,
     full: active >= CHANNEL_CAP,
   };
 }

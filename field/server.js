@@ -220,6 +220,8 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
 };
 
 //Ingress 가 /ch0/core.js 를 경로 그대로 넘겨준다(GKE 는 경로 재작성이 없다). 그래서 앞의 /ch0 을 내가 떼야 한다.
@@ -257,23 +259,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (urlPath === '/metrics') {
-    const m = C.channelMetrics(everyone());
-    res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4' });
-    res.end(
-      `# HELP active_players 이 채널에 접속한 인원\n` +
-      `# TYPE active_players gauge\n` +
-      `active_players{channel="${CHANNEL_ID}"} ${m.active_players}\n` +
-      `# HELP channel_full 정원(${C.CHANNEL_CAP}) 도달 여부\n` +
-      `# TYPE channel_full gauge\n` +
-      `channel_full{channel="${CHANNEL_ID}"} ${m.full ? 1 : 0}\n` +
-      `# HELP channel_draining 폐쇄 중인지\n` +
-      `# TYPE channel_draining gauge\n` +
-      `channel_draining{channel="${CHANNEL_ID}"} ${draining ? 1 : 0}\n`
-    );
-    return;
-  }
-
   //클라이언트가 "채널 몇 개 있고 어디로 가면 되냐" 를 물어보는 곳.
   //목록이 redis 명부에서 나오기 때문에 KEDA 가 파드를 늘리면 여기도 자동으로 늘어난다.
   if (urlPath === '/channels') {
@@ -288,7 +273,9 @@ const server = http.createServer(async (req, res) => {
   //어느 파드가 응답해도 같은 값이 나온다(전부 같은 redis 명부를 본다).
   if (urlPath === '/scale') {
     const list = await listChannels();
-    const total = list.reduce((s, c) => s + (c.players || 0), 0);
+    //KEDA 는 sub 채널(1~4)만 스케일한다. 홈 채널(0번)은 main_channel.yaml 이 항상 띄우므로
+    //인원 합에서 뺀다. 안 빼면 0번에 사람이 몰릴 때 빈 sub 채널이 과다하게 뜬다.
+    const total = list.filter(c => c.index !== 0).reduce((s, c) => s + (c.players || 0), 0);
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ total_players: total, channels: list.length }));
     return;

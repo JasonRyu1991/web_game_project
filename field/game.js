@@ -42,14 +42,22 @@ const SPAWN_MAX = 14;          // 화면 밖 포함 동시 존재 몬스터 수
 const SPAWN_EVERY = 1.6;       // 초
 const AGGRO = 240;             // 몬스터가 쫓아오기 시작하는 거리
 const PX = 3.2;                // 스프라이트 확대 배율 기준
+// 배경 시차. 1 이면 지면과 같이 흐른다. 예전 패럴랙스 3겹(0.10/0.26/0.52)을 한 장으로 합치면서
+// 0.15 로 뒀더니 상대 운동이 사라져 걸음이 느려 보였다. 중간값 근처로 올린다.
+const BG_SPEED = 0.38;
+// 점프. 최고 높이는 v²/2g ≈ 61px 로, 가장 큰 몬스터(새스쿼치 h65)의 어깨쯤까지 뜬다.
+const JUMP_V = 340;            // 초기 상승 속도(px/s)
+const GRAVITY = 950;           // 중력 가속도(px/s²). 체공 약 0.7초
 const SWING_T = 0.26;          // 칼 휘두르는 동작 길이(초)
 // 베는 동작 2종을 번갈아 쓴다. 한 종류만 있으면 몇 초만 봐도 반복이 눈에 띈다.
 // from/to 는 손을 축으로 한 칼 각도(라디안, 0 이 위로 세운 상태).
+// 캐릭터가 정지 그림 한 장이라 팔만 따로 움직일 수 없다. 대신 몸 전체를 동작에 참여시킨다 —
+// 베기는 몸을 기울이고, 찌르기는 몸을 앞으로 깊게 밀어 넣는다. 그래야 팔 없이도 동작이 읽힌다.
 const SWINGS = [
-  { name: '내려베기', from: -1.35, to: 1.45, lunge: 3.5 },
-  { name: '올려베기', from: 1.30, to: -1.05, lunge: 2.0 },
+  { name: '베기',   thrust: false, from: -1.35, to: 1.45, lunge: 3.5, tilt: 0.16 },
+  { name: '찌르기', thrust: true,  from: 1.40,  to: 1.66, lunge: 11,  tilt: 0.05 },
 ];
-const REST_ANGLE = -0.5;       // 평상시 칼을 뒤로 세운 각도
+const REST_ANGLE = -0.72;      // 평상시 각도. 등에 비스듬히 멘 것처럼 보이게 눕혔다
 const easeOut = t => 1 - Math.pow(1 - t, 3);
 const swingAngle = (sw, t) => sw.from + (sw.to - sw.from) * easeOut(C.clamp(t, 0, 1));
 
@@ -89,6 +97,8 @@ function makePlayer(name, isMe, level, id) {
     id: id || C.newId(isMe ? 'u' : 'bot'),
     name, isMe, level, exp: 0,
     x: rnd(200, WORLD_W - 200), vx: 0, face: 1,
+    z: 0, vz: 0,                 // z = 지면 위 높이. 채널 이관에는 안 실어서 넘어가면 착지 상태로 시작한다
+
     hp: st.maxHp, maxHp: st.maxHp,
     atkCd: 0, hurtCd: 0, lastHurt: -99, dead: 0, swing: 0, swingN: 0, sw: SWINGS[0], cds: {},
     equip: { weapon: C.starterWeapon(), helmet: null, armor: null },
@@ -319,9 +329,14 @@ addEventListener('keydown', e => {
   if (isTyping(document.activeElement)) return;
   if (!state.me) return;                       // 로그인 전에는 게임 조작이 없다
   if (['ArrowLeft', 'ArrowRight', 'a', 'd'].includes(e.key)) { keys[e.key] = true; state.lastInput = now(); e.preventDefault(); }
+  // 점프. 위/w/스페이스 어느 쪽이든 받는다. 실제 도약은 update 가 지면에 있을 때만 시킨다.
+  if (['ArrowUp', 'w', ' '].includes(e.key)) { keys.jump = true; state.lastInput = now(); e.preventDefault(); }
   if (e.key === 'Enter') chatInput.focus();
 });
-addEventListener('keyup', e => { keys[e.key] = false; });
+addEventListener('keyup', e => {
+  keys[e.key] = false;
+  if (['ArrowUp', 'w', ' '].includes(e.key)) keys.jump = false;   // 점프는 키 이름이 셋이라 따로 푼다
+});
 
 // 모바일용 좌우 패드. 조작은 이동뿐이라 버튼 2개면 충분하다.
 function bindPad(id, key) {
@@ -345,7 +360,8 @@ function update(dt) {
   for (const p of state.players) {
     if (p.dead > 0) {
       p.dead -= dt;
-      if (p.dead <= 0) { p.hp = p.maxHp; p.x = rnd(200, WORLD_W - 200); }
+      // 죽는 동안은 중력을 안 돌리므로, 공중에서 죽었다면 z 를 직접 풀어야 땅에서 되살아난다
+      if (p.dead <= 0) { p.hp = p.maxHp; p.x = rnd(200, WORLD_W - 200); p.z = 0; p.vz = 0; }
       continue;
     }
 
@@ -364,7 +380,16 @@ function update(dt) {
     }
     p.x = C.clamp(p.x + dir * C.PLAYER.moveSpeed * dt, 40, WORLD_W - 40);
     if (dir) p.face = dir;
-    p.bob += dt * (dir ? 9 : 3);
+    // 공중에서는 발을 안 구르니 걷는 흔들림(bob)도 멈춘다
+    p.bob += p.z > 0 ? 0 : dt * (dir ? 9 : 3);
+
+    // 점프 — 지면에 붙어 있을 때만 뜬다. 자동 사냥 중에는 안 뛴다(입력이 곧 수동 전환이라 애초에 겹치지 않는다).
+    if (p.isMe && manual && keys.jump && p.z === 0) p.vz = JUMP_V;
+    if (p.vz !== 0 || p.z > 0) {
+      p.vz -= GRAVITY * dt;
+      p.z += p.vz * dt;
+      if (p.z <= 0) { p.z = 0; p.vz = 0; }   // 착지. 음수로 파고들면 발이 땅에 박힌다
+    }
 
     // 자동 공격
     p.atkCd -= dt;
@@ -400,7 +425,9 @@ function update(dt) {
 
     // 접촉 피해
     m.hitCd = (m.hitCd || 0) - dt;
-    if (tgt && m.hitCd <= 0 && Math.abs(tgt.x - m.x) < (m.w + 20) / 2) {
+    // 몬스터 키의 80% 위로 뛰어오르면 접촉 피해를 넘긴다 — 점프에 쓸 이유를 주는 유일한 규칙이다.
+    const over = (tgt?.z || 0) > m.h * 0.8;
+    if (tgt && !over && m.hitCd <= 0 && Math.abs(tgt.x - m.x) < (m.w + 20) / 2) {
       m.hitCd = C.PLAYER.hitCooldown;
       damagePlayer(tgt, m.def.atk);
     }
@@ -443,126 +470,12 @@ function nearestPlayer(x) {
 // 시차 네 겹. 한 장짜리 배경을 통째로 밀면 원경과 근경이 같은 속도로 움직여서
 // 아무리 잘 그려도 종이처럼 보인다. 겹마다 속도를 다르게 줘야 숲처럼 읽힌다.
 // 겹은 화면 크기가 바뀔 때만 다시 굽는다.
-let layers = null, fgTile = null, motes = [];
+let fgTile = null, motes = [];
 
 // 같은 자리에 늘 같은 나무가 서 있어야 한다. Math.random 을 쓰면 리사이즈마다 숲이 바뀐다.
 function seeded(seed) {
   let x = seed >>> 0;
   return () => (x = (x * 1664525 + 1013904223) >>> 0) / 4294967296;
-}
-
-function layerCanvas(w, h) {
-  const c = document.createElement('canvas');
-  c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h));
-  return [c, c.getContext('2d')];
-}
-
-// 잎 뭉치. 원 하나로 그리면 사탕처럼 보여서 작은 원을 겹쳐 덩어리를 만든다.
-function canopy(g, x, y, r, dark, mid, light) {
-  const blobs = [[0, 0, 1], [-.62, .16, .74], [.62, .16, .74], [-.3, -.5, .66], [.34, -.46, .62], [0, .42, .7]];
-  g.fillStyle = dark;
-  for (const [dx, dy, k] of blobs) { g.beginPath(); g.arc(x + dx * r, y + dy * r + r * .07, r * k, 0, 7); g.fill(); }
-  g.fillStyle = mid;
-  for (const [dx, dy, k] of blobs) { g.beginPath(); g.arc(x + dx * r, y + dy * r - r * .06, r * k * .82, 0, 7); g.fill(); }
-  g.fillStyle = light;
-  g.beginPath(); g.arc(x - r * .3, y - r * .42, r * .42, 0, 7); g.fill();
-  g.beginPath(); g.arc(x + r * .22, y - r * .3, r * .26, 0, 7); g.fill();
-}
-
-function ridge(g, w, baseY, amp, step, seed, fill) {
-  const r = seeded(seed);
-  g.fillStyle = fill;
-  g.beginPath(); g.moveTo(0, baseY);
-  for (let x = 0; x <= w + step; x += step) {
-    const peak = baseY - amp * (0.45 + r() * 0.55);
-    g.lineTo(x - step / 2, peak);
-    g.lineTo(x, baseY - amp * 0.16 * r());
-  }
-  g.lineTo(w, baseY); g.lineTo(w, baseY + 400); g.lineTo(0, baseY + 400); g.closePath(); g.fill();
-}
-
-function buildLayers(vw, vh) {
-  const gy = vh - GROUND_H;
-
-  /* 하늘 — 화면 고정 */
-  const [sky, sg] = layerCanvas(vw, vh);
-  const grad = sg.createLinearGradient(0, 0, 0, gy);
-  grad.addColorStop(0, '#4fa8d8');
-  grad.addColorStop(.55, '#8fd0ea');
-  grad.addColorStop(1, '#dff0f2');          // 지평선은 옅게 — 대기 원근
-  sg.fillStyle = grad; sg.fillRect(0, 0, vw, vh);
-  const sun = sg.createRadialGradient(vw * .78, vh * .12, 8, vw * .78, vh * .12, vh * .55);
-  sun.addColorStop(0, 'rgba(255,246,214,.85)');
-  sun.addColorStop(.35, 'rgba(255,238,190,.22)');
-  sun.addColorStop(1, 'rgba(255,238,190,0)');
-  sg.fillStyle = sun; sg.fillRect(0, 0, vw, vh);
-
-  const mk = (speed, draw) => {
-    const w = WORLD_W * speed + vw + 80;
-    const [c, g] = layerCanvas(w, vh);
-    draw(g, w, gy);
-    return { cv: c, speed };
-  };
-
-  /* 원경 — 산맥 두 겹, 안개에 잠긴다 */
-  const far = mk(.10, (g, w, gy) => {
-    ridge(g, w, gy - 34, 250, 300, 7, '#8fb3c9');
-    ridge(g, w, gy - 12, 180, 220, 19, '#7aa0ba');
-    const haze = g.createLinearGradient(0, gy - 260, 0, gy);
-    haze.addColorStop(0, 'rgba(223,240,242,0)');
-    haze.addColorStop(1, 'rgba(223,240,242,.78)');
-    g.fillStyle = haze; g.fillRect(0, gy - 260, w, 260);
-  });
-
-  /* 중경 — 언덕과 먼 나무 실루엣 */
-  const mid = mk(.26, (g, w, gy) => {
-    ridge(g, w, gy + 2, 120, 190, 41, '#5f8f66');
-    const r = seeded(101);
-    for (let x = -40; x < w; x += 34 + r() * 26) {
-      const h = 74 + r() * 46;
-      g.fillStyle = '#3f6f4c';
-      g.fillRect(x, gy - h * .34, 5, h * .34);
-      canopy(g, x + 2, gy - h * .48, h * .3, '#3a6b48', '#487a54', '#54885d');
-    }
-    const haze = g.createLinearGradient(0, gy - 150, 0, gy);
-    haze.addColorStop(0, 'rgba(210,234,238,0)');
-    haze.addColorStop(1, 'rgba(210,234,238,.42)');
-    g.fillStyle = haze; g.fillRect(0, gy - 150, w, 150);
-  });
-
-  /* 근경 — 굵은 나무. 여기부터 색이 진해지고 하이라이트가 붙는다 */
-  const near = mk(.52, (g, w, gy) => {
-    const r = seeded(2027);
-    for (let x = -60; x < w; x += 96 + r() * 90) {
-      const h = 150 + r() * 120, tw = 12 + r() * 7;
-      g.fillStyle = '#4a3524'; g.fillRect(x, gy - h * .42, tw, h * .42);
-      g.fillStyle = '#5d452e'; g.fillRect(x, gy - h * .42, tw * .38, h * .42);
-      g.fillStyle = '#3a2a1c';
-      g.beginPath(); g.ellipse(x + tw / 2, gy, tw * 1.5, 4, 0, 0, 7); g.fill();
-      canopy(g, x + tw / 2, gy - h * .62, h * .3, '#255d3a', '#2f7548', '#3f8f58');
-    }
-  });
-
-  /* 최전경 — 풀숲. 캐릭터 앞에 깔려 깊이를 만든다 */
-  const [ft, fg] = layerCanvas(300, 44);
-  const fr = seeded(555);
-  for (let i = 0; i < 90; i++) {
-    const x = fr() * 300, h = 12 + fr() * 26;
-    fg.strokeStyle = ['#2c5f31', '#356e38', '#3f7d40'][i % 3];
-    fg.lineWidth = 2 + fr() * 2; fg.lineCap = 'round';
-    fg.beginPath(); fg.moveTo(x, 44);
-    fg.quadraticCurveTo(x + (fr() - .5) * 12, 44 - h * .6, x + (fr() - .5) * 22, 44 - h);
-    fg.stroke();
-  }
-  fgTile = ft;
-
-  // 떠다니는 홀씨 — 정지 화면이 죽어 보이지 않게
-  motes = Array.from({ length: 26 }, () => ({
-    x: Math.random() * vw, y: Math.random() * (vh - GROUND_H),
-    r: .8 + Math.random() * 1.8, s: 4 + Math.random() * 12, p: Math.random() * 7,
-  }));
-
-  return { sky, list: [far, mid, near], h: vh };
 }
 
 // 지면 — 잔디 띠, 흙, 잔돌. 세로로 층을 나눠야 납작해 보이지 않는다.
@@ -584,13 +497,28 @@ function drawGround(gy, w, h) {
   }
 }
 
+// 실제 시각을 그대로 쓴다. 새벽 5~8시, 낮 8~19시, 나머지는 밤.
+function timeOfDay() {
+  const hr = new Date().getHours();
+  return (hr < 5 || hr >= 19) ? 'night' : hr < 8 ? 'dawn' : 'day';
+}
+
+// 배경은 시간대별 PNG 한 장을 가로로 반복해 깐다.
+// 좌우 끝이 둘 다 큰 나무 줄기라 이어 붙여도 경계가 눈에 안 띈다.
+function drawBg(gy, w) {
+  const s = SP.sprite('bg_' + timeOfDay());
+  if (!s) { ctx.fillStyle = '#8fd0ea'; ctx.fillRect(0, 0, w, gy); return; }
+  const dh = gy, dw = s.w * (dh / s.h);
+  ctx.imageSmoothingEnabled = false;
+  const off = -(state.cam * BG_SPEED) % dw;
+  for (let x = off - dw; x < w; x += dw) ctx.drawImage(s.cv, 0, 0, s.w, s.h, x, 0, dw, dh);
+}
+
 function render() {
   const w = state.vw, h = state.vh, gy = h - GROUND_H;
-  if (!layers || layers.h !== h) layers = buildLayers(w, h);
 
   ctx.clearRect(0, 0, w, h);
-  ctx.drawImage(layers.sky, 0, 0);
-  for (const L of layers.list) ctx.drawImage(L.cv, -state.cam * L.speed, 0);
+  drawBg(gy, w);
 
   // 홀씨
   ctx.fillStyle = 'rgba(255,255,240,.55)';
@@ -649,10 +577,15 @@ function render() {
   }
 }
 
+// 갑옷을 입으면 그 갑옷 전신 스프라이트가 곧 몸이다. 맨몸이면 성별 기본 캐릭터.
+const bodyKey = p => (p.equip && p.equip.armor)
+  ? 'armor' + p.equip.armor.grade
+  : (p.gender === 'female' ? 'female' : 'male');
+
 function drawPlayer(p, gy) {
   if (p.dead > 0) return;
-  // 격자가 22x28 로 커졌다. 화면상 키(dh)는 그대로 두고 한 칸 크기를 역산해야 픽셀이 정사각형으로 남는다.
-  const d = SP.dims('player');
+  // 화면상 키(dh)는 고정하고 한 칸 크기를 역산해야 스프라이트마다 픽셀이 정사각형으로 남는다.
+  const d = SP.dims(bodyKey(p));
   const dh = 14 * PX;
   const unit = dh / d.h;
   const dw = d.w * unit;
@@ -664,11 +597,23 @@ function drawPlayer(p, gy) {
   const sw = p.sw || SWINGS[0];
   const t = p.swing > 0 ? 1 - p.swing / SWING_T : null;
   const lunge = t == null ? 0 : Math.sin(t * Math.PI) * sw.lunge * (flip ? -1 : 1);
-  const px = p.x + lunge, foot = gy - hop;
+  const px = p.x + lunge, foot = gy - hop - (p.z || 0);   // z 는 지면 위 높이. 원격 플레이어는 값이 없어 0
 
-  // 갑옷 = 몸통(b)·트림(B) 색 교체
-  const armorPal = eq.armor ? SP.ARMOR_PAL[eq.armor.grade - 1] : undefined;
-  SP.drawSprite(ctx, 'player', px, foot, dw, dh, { flip, pal: armorPal });
+  // 캐릭터 스프라이트가 빈손·차렷 자세라 "칼을 쥔 손"이 그림에 없다. 칼을 몸 앞에 겹치면
+  // 쥔 게 아니라 떠 있는 물건으로 보인다. 그래서 평상시엔 몸보다 먼저 그려 등에 멘 것처럼 두고,
+  // 휘두를 때만 몸 앞으로 꺼낸다. 손 위치도 그 두 상태에서 다르게 잡는다.
+  const swinging = t != null;
+  const thrust = swinging && sw.thrust;
+  // 찌르기는 칼을 앞으로 뻗으므로 손이 더 바깥·위로 간다.
+  const hx = px + (flip ? -1 : 1) * dw * (swinging ? (thrust ? 0.46 : 0.34) : 0.20);
+  const hy = foot - dh * (swinging ? (thrust ? 0.56 : 0.50) : 0.62);
+  const ang = swinging ? swingAngle(sw, t) : REST_ANGLE;
+
+  if (eq.weapon && !swinging) SP.drawWeapon(ctx, eq.weapon.grade, hx, hy, ang, wUnit, flip);
+
+  // 동작 중엔 몸을 발끝을 축으로 기울인다. 최고점에서 가장 많이 기울고 끝에서 되돌아온다.
+  const tilt = swinging ? Math.sin(t * Math.PI) * sw.tilt * (flip ? -1 : 1) : 0;
+  SP.drawSprite(ctx, bodyKey(p), px, foot, dw, dh, { flip, tilt });
 
   // 투구 = 머리 위 덧그리기. 투구 격자는 12칸 기준이라 캐릭터 폭에 맞춰 따로 배율을 잡는다.
   if (eq.helmet) {
@@ -676,30 +621,34 @@ function drawPlayer(p, gy) {
     const hw = dw * 0.86, hh = hs.h * (hw / hs.w);
     ctx.save();
     ctx.imageSmoothingEnabled = false;
+    if (tilt) { ctx.translate(px, foot); ctx.rotate(tilt); ctx.translate(-px, -foot); }  // 몸과 같이 기운다
     if (flip) { ctx.translate(px * 2, 0); ctx.scale(-1, 1); }
     ctx.drawImage(hs.cv, 0, 0, hs.w, hs.h, px - hw / 2, foot - dh - hh * 0.18, hw, hh);
     ctx.restore();
   }
 
-  // 무기 = 손을 축으로 회전. 평상시는 뒤로 세우고, 때릴 때 베어 낸다.
-  const hx = px + (flip ? -1 : 1) * 6.5 * unit;   // 손 위치(격자 좌표 기준)
-  const hy = foot - 10.5 * unit;
-  const ang = t == null ? REST_ANGLE : swingAngle(sw, t);
-
   // 궤적은 무기가 없어도 그린다 (맨손이어도 때리는 게 보여야 한다).
-  if (t != null) {
-    const trail = swingAngle(sw, Math.max(0, t - 0.34));
-    slashArc(hx, hy, wUnit, flip, trail, ang, Math.sin(t * Math.PI),
-             eq.weapon ? SP.WEAPON_GLOW[eq.weapon.grade - 1] : null, wUnit);
+  if (swinging) {
+    // 호를 그리는 궤적은 베기 전용이다. 찌르기는 칼이 거의 안 도니 호가 부채처럼 뭉개진다.
+    if (!thrust) {
+      const trail = swingAngle(sw, Math.max(0, t - 0.34));
+      slashArc(hx, hy, wUnit, flip, trail, ang, Math.sin(t * Math.PI),
+               eq.weapon ? SP.WEAPON_GLOW[eq.weapon.grade - 1] : null, wUnit);
+    } else {
+      thrustTrail(hx, hy, wUnit, flip, Math.sin(t * Math.PI),
+                  eq.weapon ? SP.WEAPON_GLOW[eq.weapon.grade - 1] : null);
+    }
+    if (eq.weapon) SP.drawWeapon(ctx, eq.weapon.grade, hx, hy, ang, wUnit, flip);
   }
-  if (eq.weapon) SP.drawWeapon(ctx, eq.weapon.grade, hx, hy, ang, wUnit, flip);
   // 이름 + 체력
   ctx.textAlign = 'center';
   ctx.font = 'bold 11px ui-sans-serif, system-ui';
   ctx.fillStyle = p.isMe ? '#f2c14e' : '#dfe7ef';
   const lift = p.isMe ? 0 : 15 + (state.players.indexOf(p) % 3) * 13;
-  ctx.fillText(`${p.name} Lv.${p.level}`, p.x, gy - dh - 18 - lift);
-  bar(p.x - 22, gy - dh - 14 - lift, 44, 5, p.hp / p.maxHp, '#7ac74f');
+  // 점프 높이(z)만 따라 올리고 걷는 흔들림(hop)은 뺀다 — 이름표가 계속 떨면 읽기 나쁘다
+  const top = gy - (p.z || 0) - dh;
+  ctx.fillText(`${p.name} Lv.${p.level}`, p.x, top - 18 - lift);
+  bar(p.x - 22, top - 14 - lift, 44, 5, p.hp / p.maxHp, '#7ac74f');
 }
 
 /* ---------- 스킬 이펙트 ---------- */
@@ -776,7 +725,8 @@ function drawFx(f, gy) {
       const y = gy - 330 * (1 - ease.in(k));
       if (k < 1) {
         const sp = SP.weaponSprite(d.g);
-        const u = 2.4, w = sp.w * u, h = sp.h * u;
+        if (!sp) continue;
+        const h = 64, w = sp.w * (h / sp.h);   // 원본이 세로로 길어서 높이를 고정하고 폭을 비율로 잡는다
         glow(() => {                        // 낙하 잔상
           ctx.globalAlpha = .5;
           ctx.strokeStyle = 'rgba(255,220,150,.7)'; ctx.lineWidth = 4;
@@ -941,6 +891,25 @@ function drawFx(f, gy) {
 
 // 베는 궤적. 칼만 돌리면 동작이 안 읽혀서 잔상을 같이 그린다.
 // 칼 각도 0 은 "위로 세움"이고 캔버스 각도 0 은 +x 방향이라 -90도 만큼 돌려서 맞춘다.
+// 찌르기 잔상 — 칼끝이 나아간 방향으로 뻗는 직선 빛. 호 대신 이걸 쓴다.
+function thrustTrail(hx, hy, unit, flip, strength, tint) {
+  if (strength <= 0.02) return;
+  const dir = flip ? -1 : 1, len = unit * 11 * strength;
+  glow(() => {
+    const g = ctx.createLinearGradient(hx, hy, hx + dir * len, hy);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(.55, tint || 'rgba(255,246,214,.85)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = g;
+    ctx.lineWidth = unit * 1.6 * strength;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(hx - dir * unit * 2, hy);
+    ctx.lineTo(hx + dir * len, hy);
+    ctx.stroke();
+  });
+}
+
 function slashArc(hx, hy, unit, flip, a0, a1, strength, glow, wUnit) {
   if (strength <= 0.02) return;
   const r = (wUnit || unit) * 7.5, H = Math.PI / 2;
@@ -965,8 +934,7 @@ function drawMonster(m, gy) {
   // 종마다 격자 비율이 달라서, 높이만 정하고 폭은 원본 비율로 뽑는다.
   const d = SP.dims(m.type);
   const dh = m.h * 1.5, dw = d.w * (dh / d.h);
-  const pal = m.tie ? { T: SP.SENATOR_TIES[m.tie] } : null;
-  SP.drawSprite(ctx, m.type, m.x, gy, dw, dh, { flip: m.face > 0, pal, flash: m.flash > 0 ? m.flash * 3 : 0 });
+  SP.drawSprite(ctx, m.type, m.x, gy, dw, dh, { flip: m.face > 0, flash: m.flash > 0 ? m.flash * 3 : 0 });
   // 몬스터 체력바 — 항상 보이게 (스펙 요구)
   const bw = Math.max(40, dw);
   bar(m.x - bw / 2, gy - dh - 12, bw, m.boss ? 8 : 5, m.hp / m.maxHp, m.boss ? '#ff4d4d' : '#ef7d7d');
@@ -1036,11 +1004,15 @@ function gauge(id, cur, max) {
 function renderGear() {
   $('gear').innerHTML = C.SLOT_KEYS.map(k => {
     const it = state.save.equip[k];
+    // 등급색은 테두리까지 물들이지 않고 아이템 이름과 등급 점에만 쓴다.
+    // 슬롯 셋을 전부 형광 테두리로 두르면 화면에서 무엇이 중요한지가 사라진다.
     const tint = it ? C.GRADE_TINTS[it.grade - 1] : '#39424f';
-    return `<div class="slot${it ? '' : ' empty'}" style="border-color:${tint}">
+    return `<div class="slot${it ? '' : ' empty'}">
       <div class="sname">${C.SLOTS[k].name}</div>
       <div class="sval" style="color:${tint}">${it ? SP.GEAR_NAME[k][it.grade - 1] : '없음'}</div>
-      <div class="sstat">${it ? 'T' + it.grade + ' · ' + C.SLOTS[k].label + ' +' + it.power : '-'}</div>
+      <div class="sstat">${it
+        ? `<i class="dot" style="background:${tint}"></i>T${it.grade} · ${C.SLOTS[k].label} +${it.power}`
+        : '-'}</div>
     </div>`;
   }).join('');
 }
@@ -1334,7 +1306,6 @@ function fit() {
   cv.width = Math.round(state.vw * dpr);
   cv.height = Math.round(state.vh * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  layers = null;
 }
 
 /* ---------- 로그인 ---------- */
@@ -1356,7 +1327,8 @@ async function submitLogin() {
 
 async function submitSignup() {
   const name = $('suName').value, id = $('suId').value, pw = $('suPw').value;
-  const r = await Auth.signup(name, id, pw);
+  const sex = document.querySelector('#suSex input:checked');
+  const r = await Auth.signup(name, id, pw, sex ? sex.value : 'male');
   if (r.err) { $('suErr').textContent = r.err; return; }
   await Auth.login(id, pw);          // 가입 직후 또 로그인시키면 번거롭다
   startGame(Auth.current());
@@ -1385,6 +1357,7 @@ async function startGame(acc) {
   if (acc.name && state.save.name !== acc.name) state.save.name = acc.name;
   // 관리 계정은 확인용이라 늘 전 장비를 들고 있어야 한다. 버튼을 눌러야만 생기면 매번 번거롭다.
   state.me = makePlayer(state.save.name, true, state.save.level, acc.id);
+  state.me.gender = acc.gender || 'male';   // 성별 나오기 전에 만든 계정은 남자로 본다
   state.me.exp = state.save.exp;
   if (!state.save.equip.weapon) {
     state.save.equip.weapon = C.starterWeapon();
@@ -1403,6 +1376,7 @@ async function startGame(acc) {
   addEventListener('resize', fit);
   bindPad('padL', 'ArrowLeft');
   bindPad('padR', 'ArrowRight');
+  bindPad('padJ', 'jump');
   $('btnBag').onclick = () => bagOpen(true);
   $('bagClose').onclick = () => bagOpen(false);
   $('bagModal').onclick = e => { if (e.target.id === 'bagModal') bagOpen(false); };

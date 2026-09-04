@@ -176,10 +176,9 @@ t('버전이 다른 이관 페이로드는 거부한다', () => {
   assert.strictEqual(C.applyTransfer({}, null), false);
 });
 
-t('KEDA 트리거와 pod-deletion-cost 는 같은 값을 본다', () => {
+t('채널 지표는 인원과 정원 도달 여부를 센다', () => {
   const m = C.channelMetrics([{}, {}, {}]);
   assert.strictEqual(m.active_players, 3);
-  assert.strictEqual(m.deletion_cost, m.active_players);
   assert.strictEqual(C.channelMetrics(new Array(C.CHANNEL_CAP).fill({})).full, true);
   assert.strictEqual(C.channelMetrics([{}]).full, false);
 });

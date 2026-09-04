@@ -1,4 +1,4 @@
-# 기본 써비쓰 어카운트
+# GKE 노드·앱이 쓸 기본 서비스 계정
 resource "google_service_account" "default" {
   account_id   = "web-game-service-account"
   display_name = "Web Game Service Account"
@@ -28,7 +28,7 @@ resource "google_project_iam_member" "artifactregistry_reader" {
   member  = "serviceAccount:${google_service_account.default.email}"
 }
 
-# Github actions용 WIF 어카운트
+# GitHub Actions(WIF)용 계정
 resource "google_service_account" "wif_service_account" {
   account_id   = "wif-service-account"
   display_name = "Wif Service Account"

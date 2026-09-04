@@ -2,7 +2,7 @@ resource "google_compute_global_address" "global_ip" {
   name          = "web-game-global-ip"
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"  # 인터넷용(EXTERNAL) 아님. VPC 내부 전용 대역
-  prefix_length = 16          # 피어링 대역 크기. /16 = IP 6.5만개. Google 권장값(나중에 못 늘려서 크게 잡음)
+  prefix_length = 16          # /16 = IP 6.5만개. 나중에 못 늘려서 Google 권장대로 크게
   network       = google_compute_network.web_game_network.id
 }
 
@@ -21,10 +21,10 @@ resource "google_sql_database_instance" "web_game_db_instance" {
 
   settings {
     tier              = "db-f1-micro"  
-    availability_type = "ZONAL"         #돈 아낄 용도의 zonal.....
+    availability_type = "ZONAL"         # 싸게 가려고 단일 존
     ip_configuration {
       ipv4_enabled    = false  
-      private_network = google_compute_network.web_game_network.id # 이게 VPC 피어링을 한 다음, 외부에 있음에도 vpc 내부망 ip를 주게끔 해놓은 것
+      private_network = google_compute_network.web_game_network.id # 피어링 덕에 외부 인스턴스가 VPC 내부 IP를 받음
     }
   }
 

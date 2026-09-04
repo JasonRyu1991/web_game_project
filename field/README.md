@@ -36,11 +36,13 @@
 2. `state.players` — 지금은 로컬 더미 2명(`ponytail:` 주석). WS 로 채널 멤버를 받아 채우면 된다
 3. `chatInput` 의 Enter 핸들러 — 로컬 echo → WS 방송
 
-`/metrics` 로 내보낼 지표는 `state.players.length`(= `active_players`)이고,
-`pod-deletion-cost` 에 같은 값을 써넣으면 한산한 채널부터 닫힌다.
+채널 파드는 `/scale` 로 명부 전체 인원 합을 내보내고, KEDA metrics-api 스케일러가
+그 값을 `targetValue` 로 나눠 채널 파드 수를 정한다. 실제 "채널 닫기"는 server.js 의 SIGTERM 드레인이 한다.
 
 ## 튜닝 메모
 
 - 곰(atk 20)이 1레벨 유저(최대 체력 74)를 3초 만에 죽여서, 멧돼지 `minLv 3` · 곰 `minLv 6` 게이트를 넣었다.
   스펙상 넷 다 "기본 몬스터"이므로 이 두 줄만 지우면 원안대로 돌아간다 (`core.js` MONSTERS)
-- 점프는 넣지 않았다. 지면이 평평해서 쓸 데가 없고, 자동 사냥과도 충돌한다
+- 점프(`ArrowUp`·`w`·`Space`)는 `z`(지면 위 높이)로만 다룬다. 지면이 평평해서 지형 용도는 없고,
+  **몬스터 키의 80% 위로 뜨면 접촉 피해를 넘긴다** — 이 한 줄이 점프를 쓸 유일한 이유다.
+  자동 사냥과는 겹치지 않는다. 점프키를 누르는 순간 `lastInput` 이 갱신돼 수동 모드로 돌아가기 때문이다

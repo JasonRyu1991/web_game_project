@@ -1,4 +1,4 @@
-#Github actions용 WIF 어카운트
+# GitHub Actions OIDC → GCP 임퍼서네이션용 WIF 풀
 resource "google_iam_workload_identity_pool" "pool" {
   workload_identity_pool_id = "workload-identity-pool"
 }

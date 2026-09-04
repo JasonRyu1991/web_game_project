@@ -5,15 +5,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=IBM+Plex+Sans+KR:wght@400;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
-<title>방치의 숲</title>
+<title>시간 낭비의 숲</title>
 <style>
   /* 팔레트는 스프라이트에서 뽑았다 — 슬라임 초록, 하늘 파랑, 푸 노랑/빨강.
      중성색도 순회색이 아니라 숲 쪽으로 살짝 기울여 둔다.
      게임 HUD 라서 라이트/다크 전환 없이 한 가지 화면으로 못 박는다. */
   :root{
-    --ground:#12180f; --panel:#1b2416; --raise:#232f1c; --line:#2f3d26;
-    --ink:#e9f0e2; --dim:#93a486;
-    --gold:#f2c14e; --hp:#7ac74f; --xp:#6fc0e8; --danger:#d94b3a;
+    /* 색은 타이틀 그림에서 뽑았다 — 크림골드 글자, 이끼 낀 나무, 반딧불 청록. */
+    --ground:#0f1410; --panel:#1b2416; --raise:#232f1c; --line:#37402a;
+    --ink:#ece4d2; --dim:#98a288;
+    --gold:#e8c97a; --hp:#7ac74f; --xp:#86d9c4; --danger:#d94b3a;
     --display:'Do Hyeon', ui-sans-serif, system-ui, sans-serif;
     --ui:'IBM Plex Sans KR', ui-sans-serif, 'Apple SD Gothic Neo', sans-serif;
     --mono:'IBM Plex Mono', ui-monospace, monospace;
@@ -53,7 +54,11 @@
 
   /* 장비 */
   #gear{position:absolute;left:12px;top:12px;display:flex;gap:7px}
-  .slot{background:rgba(18,24,15,.85);border:1px solid;border-radius:4px;padding:7px 9px;min-width:84px}
+  /* 슬롯 테두리는 뉴트럴로 통일하고, 등급은 이름 색과 앞의 점으로만 말한다 */
+  .slot{background:rgba(15,20,16,.82);border:1px solid var(--line);border-left-width:1px;
+    border-radius:3px;padding:7px 9px;min-width:84px}
+  .slot.empty{opacity:.5}
+  .dot{display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:5px;vertical-align:middle}
   .sname{font-size:10px;color:var(--dim);letter-spacing:.08em}
   .sval{font:400 15px/1.25 var(--display)}
   .sstat{font:500 10px var(--mono);color:var(--dim);font-variant-numeric:tabular-nums}
@@ -69,7 +74,8 @@
   .gtrack i{display:block;height:100%;background:linear-gradient(90deg,var(--gold),var(--danger));transition:width .2s}
   .glabel{display:flex;justify-content:space-between;font-size:11px;color:var(--dim)}
   .glabel b{font:500 11px var(--mono);font-variant-numeric:tabular-nums}
-  button{width:100%;padding:8px;border-radius:4px;border:1px solid var(--line);
+  /* 둥근 모서리를 거의 없앤다. 4px 이 붙으면 게임 UI 가 아니라 웹 폼처럼 보인다 */
+  button{width:100%;padding:8px;border-radius:2px;border:1px solid var(--line);
     background:var(--raise);color:var(--ink);font:400 14px var(--display);cursor:pointer;
     transition:background .12s,border-color .12s}
   button:disabled{opacity:.35;cursor:not-allowed}
@@ -100,7 +106,8 @@
     background:rgba(35,47,28,.6);border:1px solid var(--line);display:grid;place-items:center;
     font-size:22px;color:#cfe0c4;user-select:none;touch-action:none}
   .pad:active{background:rgba(47,61,38,.85)}
-  #padL{left:14px} #padR{left:88px}
+  /* 이동은 왼손, 점프는 오른손 — 엄지가 겹치지 않게 반대편에 둔다 */
+  #padL{left:14px} #padR{left:88px} #padJ{right:14px}
 
   /* 채팅 */
   #chat{height:124px;display:flex;flex-direction:column;background:var(--panel);border-top:1px solid var(--line)}
@@ -117,21 +124,40 @@
      390px 폭에서 좌측 장비(3칸)와 우측 채널 패널이 겹친다.
      장비는 칸을 좁히고, 기여도는 위쪽 경쟁을 피해 아래로 내린다. */
   /* 로그인 */
-  #login{position:fixed;inset:0;z-index:20;background:var(--ground);display:grid;place-items:center;padding:16px}
-  .loginbox{width:min(360px,100%);display:flex;flex-direction:column;gap:9px}
-  .loginbox h1{margin:0;font:400 34px/1 var(--display);letter-spacing:.02em}
-  .tag{margin:0 0 6px;font-size:12px;color:var(--dim)}
+  /* 타이틀 그림이 화면 중앙에서 빛을 내는 구도라, 바탕도 중앙만 살짝 걷어 올린다 */
+  #login{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:16px;
+    background:radial-gradient(130% 95% at 50% 34%, #1c2618 0%, var(--ground) 68%)}
+  .loginbox{width:min(336px,100%);display:flex;flex-direction:column;gap:7px}
+  /* 그림 자체가 제목이라 h1 텍스트를 걷어냈다. alt 로 제목이 남는다 */
+  #titleArt{width:100%;height:auto;display:block;margin-bottom:3px;border-radius:5px;
+    border:1px solid var(--line);box-shadow:0 12px 34px rgba(0,0,0,.6)}
   #panelLogin,#panelSignup{display:flex;flex-direction:column;gap:9px}
   .loginbox label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--dim);letter-spacing:.06em}
-  .loginbox input{background:#0d1209;border:1px solid var(--line);border-radius:4px;color:var(--ink);
-    padding:10px;font:400 16px var(--ui);outline:none}
-  .loginbox input:focus{border-color:var(--gold)}
-  .primary{background:var(--gold);color:#141a10;border-color:var(--gold);font:400 16px var(--display);padding:10px}
+  /* 라디오는 가로로 세워야 해서 위의 세로 flex 를 되돌린다 */
+  #suSex{display:flex;gap:16px;align-items:center;margin:0;padding:5px 10px 7px;
+    border:1px solid var(--line);border-radius:6px}
+  #suSex legend{padding:0 4px;font-size:11px;color:var(--dim);letter-spacing:.06em}
+  #suSex label{flex-direction:row;align-items:center;gap:6px;font-size:13px;color:inherit;letter-spacing:0}
+  /* 글자 크기 16px 은 iOS 확대 방지라 못 줄인다. 대신 여백과 모서리를 깎아 폼 티를 뺀다.
+     안쪽 그림자로 살짝 파이게 해서 나무판에 새긴 칸처럼 보이게 한다. */
+  .loginbox input{background:#0b0f0a;border:1px solid var(--line);border-radius:2px;color:var(--ink);
+    padding:7px 9px;font:400 16px var(--ui);outline:none;
+    box-shadow:inset 0 1px 3px rgba(0,0,0,.5)}
+  .loginbox input::placeholder{color:#6d7a63}
+  .loginbox input:focus{border-color:var(--gold);box-shadow:inset 0 1px 3px rgba(0,0,0,.5),0 0 0 2px rgba(232,201,122,.16)}
+  .primary{background:var(--gold);color:#141a10;border-color:var(--gold);font:400 16px var(--display);
+    padding:9px;border-radius:2px;letter-spacing:.02em}
   .primary:not(:disabled):hover{background:#ffdc86;border-color:#ffdc86}
-  .sso{font:400 13px var(--ui);color:var(--dim)}
+  /* 주 버튼 하나만 크게 두고 나머지는 한 줄에 나눠 담는다 — 같은 폭 버튼 세 개가 쌓이면 위계가 없다 */
+  .alt{display:flex;gap:7px}
+  .alt button{flex:1;width:auto;padding:7px;font-size:13px}
+  .sso{font:400 12px var(--ui);color:var(--dim);background:transparent}
   .err{min-height:16px;font-size:12px;color:var(--danger)}
-  .note{margin:6px 0 0;font-size:11px;line-height:1.6;color:var(--dim)}
-  .note b{color:var(--gold);font:600 11px var(--mono)}
+  /* 제작자와 배포 버전. 화면 폭 양 끝으로 밀어 두면 폼과 섞이지 않는다 */
+  .foot{display:flex;justify-content:space-between;align-items:baseline;margin-top:12px;
+    padding-top:9px;border-top:1px solid rgba(55,64,42,.55);
+    font:400 11px var(--mono);color:#6d7a63;letter-spacing:.04em}
+  .foot #ver{font-variant-numeric:tabular-nums;color:#7d8a71}
 
   /* 스킬 바 */
   #skillbar{position:absolute;left:50%;transform:translateX(-50%);bottom:12px;display:flex;gap:7px}
@@ -146,8 +172,11 @@
   /* 메뉴 */
   #menuModal{position:fixed;inset:0;background:rgba(8,11,7,.72);display:grid;place-items:center;z-index:6}
   .msec{margin-bottom:16px}
-  .msec h5{margin:0 0 7px;font-size:11px;color:var(--dim);letter-spacing:.1em}
-  .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:5px 0;border-bottom:1px solid var(--line)}
+  .msec h5{margin:0 0 6px;font:400 12px var(--display);color:var(--gold);letter-spacing:.14em}
+  /* 행마다 실선을 그으면 표처럼 보인다. 선은 거의 지우고 마지막 행은 아예 뺀다 */
+  .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:4px 0;
+    border-bottom:1px solid rgba(55,64,42,.38)}
+  .kv:last-child{border-bottom:none}
   .kv b{font:500 12px var(--mono);font-variant-numeric:tabular-nums;color:var(--ink)}
   .skrow{display:flex;gap:9px;align-items:center;padding:6px 0;font-size:12px}
   .skrow .lv{width:44px}
@@ -237,13 +266,12 @@
 
     #contrib{bottom:70px}
     #toast{left:8px;right:8px;bottom:116px;transform:none;max-width:none;text-align:center}
-    .loginbox h1{font-size:28px}
     .bagbox{width:calc(100% - 16px)}
     #chat{height:104px}
     #chatLog{font-size:11px;padding:6px 9px}
     #chatInput{padding:9px;font-size:16px}   /* 16px 미만이면 iOS 가 입력 시 화면을 확대한다 */
     .pad{width:56px;height:56px;bottom:10px}
-    #padL{left:10px} #padR{left:74px}
+    #padL{left:10px} #padR{left:74px} #padJ{right:10px}
   }
 
   /* 가로로 눕힌 폰 — 세로가 짧아 화면이 다 먹힌다 */
@@ -332,35 +360,42 @@
     <div id="toast"></div>
     <div class="pad" id="padL">◀</div>
     <div class="pad" id="padR">▶</div>
+    <div class="pad" id="padJ">▲</div>
   </div>
 
   <div id="login">
     <div class="loginbox">
-      <h1>방치의 숲</h1>
+      <img id="titleArt" src="ui/title.jpg" width="704" height="384" alt="시간 낭비의 숲">
 
       <div id="panelLogin">
-        <p class="tag">아이디와 비밀번호를 넣는다</p>
-        <label>아이디<input id="liId" autocomplete="username" placeholder="아이디"></label>
-        <label>비밀번호<input id="liPw" type="password" autocomplete="current-password" placeholder="비밀번호"></label>
+        <input id="liId" autocomplete="username" placeholder="아이디" aria-label="아이디">
+        <input id="liPw" type="password" autocomplete="current-password" placeholder="비밀번호" aria-label="비밀번호">
         <div id="liErr" class="err"></div>
-        <button id="liGo" class="primary">로그인</button>
-        <button id="goSignup">회원가입</button>
-        <button id="liSso" class="sso" disabled>Google 계정으로 계속 (준비 중)</button>
-        <p class="note">
-          계정은 이 브라우저에만 저장된다. 서버가 붙기 전까지의 임시 방식이라 보안 수단이 아니다.
-        </p>
+        <button id="liGo" class="primary">숲으로 들어가기</button>
+        <div class="alt">
+          <button id="goSignup">계정 만들기</button>
+          <button id="liSso" class="sso" disabled>Google · 준비 중</button>
+        </div>
       </div>
 
       <div id="panelSignup" hidden>
-        <p class="tag">캐릭터 이름은 필드에서 다른 사람에게 보인다</p>
-        <label>캐릭터 이름<input id="suName" maxlength="10" placeholder="1~10자"></label>
-        <label>아이디<input id="suId" autocomplete="username" placeholder="영문·숫자·밑줄, 3자 이상"></label>
-        <label>비밀번호<input id="suPw" type="password" autocomplete="new-password" placeholder="4자 이상"></label>
+        <input id="suName" maxlength="10" placeholder="캐릭터 이름 (1~10자)" aria-label="캐릭터 이름">
+        <fieldset id="suSex">
+          <legend>성별</legend>
+          <label><input type="radio" name="sex" value="male" checked> 남자</label>
+          <label><input type="radio" name="sex" value="female"> 여자</label>
+        </fieldset>
+        <input id="suId" autocomplete="username" placeholder="아이디 (영문·숫자·밑줄, 3자 이상)" aria-label="아이디">
+        <input id="suPw" type="password" autocomplete="new-password" placeholder="비밀번호 (4자 이상)" aria-label="비밀번호">
         <div id="suErr" class="err"></div>
         <button id="suGo" class="primary">계정 만들기</button>
-        <button id="goLogin">로그인으로 돌아가기</button>
+        <button id="goLogin" class="sso">돌아가기</button>
       </div>
 
+      <div class="foot">
+        <span>제작 · 유준형</span>
+        <span id="ver">v2.0</span>
+      </div>
     </div>
   </div>
 

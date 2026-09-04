@@ -12,5 +12,3 @@ resource "google_artifact_registry_repository" "images" {
   description   = "web-game-image repository"
   format        = "DOCKER"
 }
-
-# resource "google_artifact_registry_rule" "artifact_registry_rule" {}

@@ -1,0 +1,60 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ["field/**", "k8s/**", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+env:
+  REGION: asia-northeast3
+  IMAGE_BASE: asia-northeast3-docker.pkg.dev/personal-webgame-project/web-game-images/web-game
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Smoke test
+        working-directory: field
+        run: npm ci --omit=dev && npm test
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          # 값은 GitHub repo Settings > Secrets and variables > Actions > Variables 에 넣는다.
+          # 예: projects/<프로젝트번호>/locations/global/workloadIdentityPools/workload-identity-pool/providers/workloadi-identity-pool-provider
+          workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: wif-service-account@personal-webgame-project.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build & push (amd64, 커밋 SHA 태그)
+        working-directory: field
+        run: |
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          IMAGE="${IMAGE_BASE}:${GITHUB_SHA::12}"
+          docker build --platform linux/amd64 -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: web-game-cluster
+          location: asia-northeast3-a
+
+      - name: Roll out to both StatefulSets
+        run: |
+          kubectl set image statefulset/channel-main channel="$IMAGE"
+          kubectl set image statefulset/channel      channel="$IMAGE"
+          kubectl rollout status statefulset/channel-main --timeout=180s
+          kubectl rollout status statefulset/channel      --timeout=300s
