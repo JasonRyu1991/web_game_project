@@ -1,6 +1,6 @@
 # field — 횡스크롤 협력 방치형
 
-`site/`(FPS)·`idle/`(방치형)에 이은 세 번째 클라이언트이자 **정본**이다.
+FPS·방치형 프로토타입(폐기됨)에 이은 세 번째 클라이언트이자 **정본**이다.
 개인 프로젝트의 인프라 명제("WebSocket 세션이 붙은 워크로드를 튕기지 않고 스케일 인")를
 증명하기 위한 워크로드로 쓴다. 맵 1개 · 채널 N개 · 채널 1개 = 파드 1개.
 
@@ -28,16 +28,14 @@
 - **조작** 방향키(또는 화면 좌우 패드)로 이동. **5초간 입력이 없으면 자동 사냥**으로 전환
 - 공격은 항상 자동. 접촉하면 체력이 깎이고, 사망 시 3초 후 부활(페널티 없음)
 
-## 서버로 옮길 때
+## 서버 (완료)
 
-`core.js` 는 이미 순수 모듈이라 그대로 `require` 하면 된다. `game.js` 에서 갈아끼울 곳은 두 군데다.
+`server.js`가 Redis(채널 명부·이관)와 Cloud SQL(`accounts`·`saves`·`chats`)을 붙여 실제로 돈다.
 
-1. `Store.load/save` — localStorage → `fetch`. 인터페이스가 이미 async 라 호출부는 그대로다
-2. `state.players` — 지금은 로컬 더미 2명(`ponytail:` 주석). WS 로 채널 멤버를 받아 채우면 된다
-3. `chatInput` 의 Enter 핸들러 — 로컬 echo → WS 방송
-
-채널 파드는 `/scale` 로 명부 전체 인원 합을 내보내고, KEDA metrics-api 스케일러가
-그 값을 `targetValue` 로 나눠 채널 파드 수를 정한다. 실제 "채널 닫기"는 server.js 의 SIGTERM 드레인이 한다.
+- 로그인·세이브는 계정 id 기준으로 Cloud SQL 한 곳에 저장 — 어느 채널 파드·어느 기기로 붙어도 같다
+- 채널 파드는 `/scale`로 명부 전체 인원 합을 내보내고, KEDA metrics-api 스케일러가
+  그 값을 `targetValue`로 나눠 채널 파드 수를 정한다
+- 실제 "채널 닫기"는 SIGTERM 드레인 — 접속자를 Redis에 park했다가 다른 채널이 claim해 이어붙인다
 
 ## 튜닝 메모
 

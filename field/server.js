@@ -370,9 +370,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  //KEDA metrics-api 스케일러가 읽어갈 전체 집계. 채널 하나가 아니라 명부 전체의 인원 합이다.
-  //KEDA 는 total_players 를 targetValue(3)로 나눠서 파드 수를 정한다. 예: 7명 → ceil(7/3)=3채널.
-  //어느 파드가 응답해도 같은 값이 나온다(전부 같은 redis 명부를 본다).
+  //KEDA metrics-api 가 읽는 전체 인원 집계. targetValue(3)로 나눠 파드 수를 정한다.
   if (urlPath === '/scale') {
     const list = await listChannels();
     //KEDA 는 sub 채널(1~4)만 스케일한다. 홈 채널(0번)은 main_channel.yaml 이 항상 띄우므로

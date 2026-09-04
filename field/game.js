@@ -5,9 +5,7 @@ const C = window.Core;
 const SP = window.Sprites;
 
 /* ---------- 저장소 ---------- */
-// 세이브는 채널 파드 → Cloud SQL 로 간다. /save/<계정id> 엔드포인트.
-// 서버가 없거나(file://) DB 가 안 붙었으면 load 가 null 을 주고, 게임은 새 세이브로 시작한다.
-// localStorage 는 서버 저장이 실패했을 때만 쓰는 임시 백업(다음 접속에서 서버가 살아있으면 서버 값이 이긴다).
+// 세이브는 /save/<계정id> 로 Cloud SQL 에 간다. localStorage 는 저장 실패 시만 쓰는 임시 백업.
 const Store = {
   id: null,
   key: null,
@@ -49,10 +47,8 @@ const BG_SPEED = 0.38;
 const JUMP_V = 340;            // 초기 상승 속도(px/s)
 const GRAVITY = 950;           // 중력 가속도(px/s²). 체공 약 0.7초
 const SWING_T = 0.26;          // 칼 휘두르는 동작 길이(초)
-// 베는 동작 2종을 번갈아 쓴다. 한 종류만 있으면 몇 초만 봐도 반복이 눈에 띈다.
+// 베기/찌르기 2종 교대. 캐릭터가 정지 그림 한 장이라 팔 대신 몸 전체(기울임/전진)로 동작을 표현한다.
 // from/to 는 손을 축으로 한 칼 각도(라디안, 0 이 위로 세운 상태).
-// 캐릭터가 정지 그림 한 장이라 팔만 따로 움직일 수 없다. 대신 몸 전체를 동작에 참여시킨다 —
-// 베기는 몸을 기울이고, 찌르기는 몸을 앞으로 깊게 밀어 넣는다. 그래야 팔 없이도 동작이 읽힌다.
 const SWINGS = [
   { name: '베기',   thrust: false, from: -1.35, to: 1.45, lunge: 3.5, tilt: 0.16 },
   { name: '찌르기', thrust: true,  from: 1.40,  to: 1.66, lunge: 11,  tilt: 0.05 },
@@ -320,9 +316,8 @@ function banner(text, color) { state.banner = { text, color, life: 1.6 }; }
 
 /* ---------- 입력 ---------- */
 const keys = {};
-// 이동키가 a·d 라서 preventDefault 를 걸면 글자가 씹힌다.
-// 채팅창만 예외로 뒀더니 로그인·회원가입 칸에서 'a','d' 를 못 쳤다(=admin 입력 불가).
-// 예외를 특정 요소가 아니라 "글자를 입력받는 요소 전부"로 잡아야 같은 버그가 안 난다.
+// 이동키가 a·d 라 채팅창만 예외 처리하면 로그인 칸의 'a','d' 도 씹힌다(admin 입력 불가 버그).
+// "글자를 입력받는 요소 전부"를 예외로 잡아야 한다.
 const isTyping = el => !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
 
 addEventListener('keydown', e => {
@@ -468,9 +463,7 @@ function nearestPlayer(x) {
 
 /* ---------- 렌더 ---------- */
 /* ---------- 배경 ---------- */
-// 시차 네 겹. 한 장짜리 배경을 통째로 밀면 원경과 근경이 같은 속도로 움직여서
-// 아무리 잘 그려도 종이처럼 보인다. 겹마다 속도를 다르게 줘야 숲처럼 읽힌다.
-// 겹은 화면 크기가 바뀔 때만 다시 굽는다.
+// 배경·지면·전경을 속도 다르게 밀어야 종이처럼 안 보이고 숲처럼 읽힌다(시차 스크롤).
 let fgTile = null, motes = [];
 
 // 같은 자리에 늘 같은 나무가 서 있어야 한다. Math.random 을 쓰면 리사이즈마다 숲이 바뀐다.
@@ -654,9 +647,7 @@ function drawPlayer(p, gy) {
 }
 
 /* ---------- 스킬 이펙트 ---------- */
-// 이미지 없이 캔버스 도형만 쓴다. 세련되게 보이는 건 색 수가 아니라
-// ① 가산 합성(lighter)으로 빛이 겹칠 것 ② 그라데이션으로 심지-외곽을 나눌 것
-// ③ 잔해·불티 같은 작은 입자를 곁들일 것 — 이 셋이다.
+// 이미지 없이 도형만 쓴다 — 가산 합성(lighter) + 심지-외곽 그라데이션 + 잔해 입자로 세련되게.
 const ease = {
   out: t => 1 - Math.pow(1 - t, 3),
   in: t => t * t,
@@ -891,8 +882,7 @@ function drawFx(f, gy) {
   ctx.restore();
 }
 
-// 베는 궤적. 칼만 돌리면 동작이 안 읽혀서 잔상을 같이 그린다.
-// 칼 각도 0 은 "위로 세움"이고 캔버스 각도 0 은 +x 방향이라 -90도 만큼 돌려서 맞춘다.
+// 칼 각도 0 은 "위로 세움", 캔버스 각도 0 은 +x 방향이라 -90도 돌려서 맞춘다.
 // 찌르기 잔상 — 칼끝이 나아간 방향으로 뻗는 직선 빛. 호 대신 이걸 쓴다.
 function thrustTrail(hx, hy, unit, flip, strength, tint) {
   if (strength <= 0.02) return;
