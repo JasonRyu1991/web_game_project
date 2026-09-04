@@ -1349,6 +1349,8 @@ async function submitSignup() {
 /* ---------- 부팅 ---------- */
 async function boot() {
   // 관리 계정은 서버가 기동 시 스스로 만든다(server.js ensureAdmin) — 클라이언트가 할 일 없음.
+  // 버전 표시는 package.json 하나만 보면 되게, 배포 태그랑 같은 값을 fetch 로 읽어온다.
+  fetch('/package.json').then(r => r.json()).then(p => { $('ver').textContent = 'v' + p.version; }).catch(() => {});
   $('liGo').onclick = submitLogin;
   $('suGo').onclick = submitSignup;
   $('goSignup').onclick = () => showPanel('signup');
