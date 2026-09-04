@@ -6,6 +6,8 @@ on:
     paths: ["field/**", "k8s/**", ".github/workflows/deploy.yml"]
   workflow_dispatch:
 
+# 배포 run이 겹치면 같은 StatefulSet에 set image가 경합한다. group이 같은 run끼리만 줄 세우고,
+# cancel-in-progress: false 라 뒤에 온 run은 앞 run이 끝날 때까지 대기(취소 아님).
 concurrency:
   group: deploy-main
   cancel-in-progress: false
@@ -18,6 +20,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # id-token: write 가 있어야 다음 auth 스텝이 GitHub OIDC 토큰을 받아 WIF 인증을 탄다.
     permissions:
       contents: read
       id-token: write
@@ -28,25 +31,30 @@ jobs:
         working-directory: field
         run: npm ci --omit=dev && npm test
 
+      # WIF: 키 파일 없이 OIDC 토큰으로 wif.tf에 등록된 서비스 계정을 임퍼서네이션한다.
       - id: auth
         uses: google-github-actions/auth@v2
         with:
-          # 값은 GitHub repo Settings > Secrets and variables > Actions > Variables 에 넣는다.
-          # 예: projects/<프로젝트번호>/locations/global/workloadIdentityPools/workload-identity-pool/providers/workloadi-identity-pool-provider
+          # vars.* 는 비밀 아닌 값(Secrets 탭 아님). 프로바이더 경로라 노출돼도 무해.
           workload_identity_provider: ${{ vars.WORKLOAD_IDENTITY_PROVIDER }}
           service_account: wif-service-account@personal-webgame-project.iam.gserviceaccount.com
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - name: Build & push (amd64, 커밋 SHA 태그)
+      - name: Build & push (amd64, package.json 버전 태그)
         working-directory: field
         run: |
           gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
-          IMAGE="${IMAGE_BASE}:${GITHUB_SHA::12}"
+          # 버전 올릴 땐 field/package.json 의 version 을 커밋에 같이 올려야 한다.
+          # 안 올리면 이전 배포와 같은 태그로 덮어쓴다(레지스트리 태그는 안 늘어남).
+          VERSION="$(node -p "require('./package.json').version")"
+          IMAGE="${IMAGE_BASE}:v${VERSION}"
           docker build --platform linux/amd64 -t "$IMAGE" .
           docker push "$IMAGE"
+          # $GITHUB_ENV 에 append하면 이후 스텝에서 $IMAGE로 그대로 쓸 수 있다.
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
+      # `gcloud container clusters get-credentials` 대체 — kubeconfig를 러너에 만들어준다.
       - uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: web-game-cluster
@@ -56,5 +64,6 @@ jobs:
         run: |
           kubectl set image statefulset/channel-main channel="$IMAGE"
           kubectl set image statefulset/channel      channel="$IMAGE"
+          # 이게 없으면 새 이미지가 실제로 떴는지 확인 안 하고 워크플로가 그냥 초록불로 끝난다.
           kubectl rollout status statefulset/channel-main --timeout=180s
           kubectl rollout status statefulset/channel      --timeout=300s

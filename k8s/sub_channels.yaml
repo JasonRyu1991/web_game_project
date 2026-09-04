@@ -1,7 +1,5 @@
-#1~4번 채널. 스팟 노드에서 값싸게 버스트되는 여유 용량이다.
-#KEDA 가 이 StatefulSet(이름 channel)의 replicas 를 인원에 맞춰 1~4 로 조절한다.
-#ordinals.start: 1 → 파드 이름이 channel-1 부터 시작한다(0번은 main_channel.yaml 이 따로 관리하므로).
-#여기 파드는 선점당해도 홈 채널(0번)은 멀쩡하고, 접속자는 server.js 드레인이 다른 채널로 넘긴다.
+#1~4번 채널, 스팟 노드에서 값싸게 버스트. KEDA 가 replicas 를 1~4 로 조절한다.
+#선점당해도 홈 채널(0번)은 멀쩡하고 접속자는 server.js 드레인이 다른 채널로 넘긴다.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -19,9 +17,7 @@ spec:
     metadata:
       labels: { app: channel }
     spec:
-      #main(홈 채널)은 660초로 정식 드레인을 하지만, sub 는 60초로 짧게 잡는다.
-      #스팟 노드가 통째로 선점당하면 그 위 파드가 grace period 만큼 Terminating 에 묶여
-      #롤아웃을 막는데(660초면 11분), sub 는 이관이 실패해도 재접속으로 복구되니 짧게 끊는다.
+      #main 은 660초 정식 드레인, sub 는 60초 — 선점 시 좀비 파드가 660초씩 롤아웃 막는 걸 피함.
       terminationGracePeriodSeconds: 60
       #스팟 노드의 자동 taint 를 참아준다 = 스팟에 올라갈 수 있다
       tolerations:
@@ -41,7 +37,7 @@ spec:
                     values: ["spot"]
       containers:
         - name: channel
-          image: asia-northeast3-docker.pkg.dev/personal-webgame-project/web-game-images/web-game:v2.0
+          image: asia-northeast3-docker.pkg.dev/personal-webgame-project/web-game-images/web-game:v2.2
           ports:
             - containerPort: 8080
           env:
