@@ -57,6 +57,10 @@ function drawSprite(ctx, key, cx, footY, drawW, drawH, opts = {}) {
   if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
   // 발끝을 축으로 기울인다. 공격 동작에서 몸이 따라 움직이게 하는 용도다.
   if (opts.tilt) { ctx.translate(cx, footY); ctx.rotate(opts.tilt); ctx.translate(-cx, -footY); }
+  // 발끝을 축으로 눌렀다 늘렸다 한다. 정지 그림에 걸음의 탄성을 주는 용도다(몬스터 등).
+  if (opts.sx || opts.sy) {
+    ctx.translate(cx, footY); ctx.scale(opts.sx || 1, opts.sy || 1); ctx.translate(-cx, -footY);
+  }
   if (opts.flip) { ctx.translate(cx * 2, 0); ctx.scale(-1, 1); }
   ctx.drawImage(s.cv, 0, 0, s.w, s.h, x, y, drawW, drawH);
   if (opts.flash) {                        // 피격 실루엣

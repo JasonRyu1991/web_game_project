@@ -66,7 +66,7 @@ const ctx = cv.getContext('2d');
 
 const state = {
   t: 0, last: 0, running: false,
-  cam: 0,
+  cam: 0, viewScale: 1,   // fit() 호출 전에도 렌더가 안전하도록 기본값을 둔다
   save: null,
   me: null,
   players: [],
@@ -134,7 +134,7 @@ function spawnMonster(type) {
     w: def.w * (boss ? 1.25 : 1), h: def.h * (boss ? 1.25 : 1),
     flash: 0, dmg: {}, boss,
     tie: type === 'senator' ? (Math.random() < .5 ? 'red' : 'blue') : null,
-    wander: rnd(-1, 1),
+    wander: rnd(-1, 1), bob: Math.random() * 6,
   };
   state.monsters.push(m);
   if (boss) banner(`${def.name} 등장!`, '#ff6b3d');
@@ -422,6 +422,7 @@ function update(dt) {
     else { m.wander += rnd(-1, 1) * dt; dir = Math.sign(Math.sin(m.wander)); }
     m.x = C.clamp(m.x + dir * m.def.speed * dt, 30, WORLD_W - 30);
     if (dir) m.face = dir;
+    m.bob = (m.bob || 0) + dt * (dir ? 10 : 3);   // 움직일 때 더 빠르게 구른다
 
     // 접촉 피해
     m.hitCd = (m.hitCd || 0) - dt;
@@ -586,7 +587,7 @@ function drawPlayer(p, gy) {
   if (p.dead > 0) return;
   // 화면상 키(dh)는 고정하고 한 칸 크기를 역산해야 스프라이트마다 픽셀이 정사각형으로 남는다.
   const d = SP.dims(bodyKey(p));
-  const dh = 14 * PX;
+  const dh = 14 * PX * state.viewScale;
   const unit = dh / d.h;
   const dw = d.w * unit;
   const wUnit = dh / 14;                 // 무기는 예전 배율을 유지한다 (칼이 너무 작아 보이지 않게)
@@ -640,15 +641,16 @@ function drawPlayer(p, gy) {
     }
     if (eq.weapon) SP.drawWeapon(ctx, eq.weapon.grade, hx, hy, ang, wUnit, flip);
   }
-  // 이름 + 체력
+  // 이름 + 체력 — 캐릭터가 커진 만큼 글자·바도 같이 키운다
+  const vs = state.viewScale;
   ctx.textAlign = 'center';
-  ctx.font = 'bold 11px ui-sans-serif, system-ui';
+  ctx.font = `bold ${Math.round(11 * vs)}px ui-sans-serif, system-ui`;
   ctx.fillStyle = p.isMe ? '#f2c14e' : '#dfe7ef';
-  const lift = p.isMe ? 0 : 15 + (state.players.indexOf(p) % 3) * 13;
+  const lift = (p.isMe ? 0 : 15 + (state.players.indexOf(p) % 3) * 13) * vs;
   // 점프 높이(z)만 따라 올리고 걷는 흔들림(hop)은 뺀다 — 이름표가 계속 떨면 읽기 나쁘다
   const top = gy - (p.z || 0) - dh;
-  ctx.fillText(`${p.name} Lv.${p.level}`, p.x, top - 18 - lift);
-  bar(p.x - 22, top - 14 - lift, 44, 5, p.hp / p.maxHp, '#7ac74f');
+  ctx.fillText(`${p.name} Lv.${p.level}`, p.x, top - 18 * vs - lift);
+  bar(p.x - 22 * vs, top - 14 * vs - lift, 44 * vs, 5 * vs, p.hp / p.maxHp, '#7ac74f');
 }
 
 /* ---------- 스킬 이펙트 ---------- */
@@ -931,17 +933,23 @@ function slashArc(hx, hy, unit, flip, a0, a1, strength, glow, wUnit) {
 }
 
 function drawMonster(m, gy) {
+  const vs = state.viewScale;
   // 종마다 격자 비율이 달라서, 높이만 정하고 폭은 원본 비율로 뽑는다.
   const d = SP.dims(m.type);
-  const dh = m.h * 1.5, dw = d.w * (dh / d.h);
-  SP.drawSprite(ctx, m.type, m.x, gy, dw, dh, { flip: m.face > 0, flash: m.flash > 0 ? m.flash * 3 : 0 });
+  const dh = m.h * 1.5 * vs, dw = d.w * (dh / d.h);
+  // 정지 그림이라 팔다리는 못 움직인다. 대신 걸을 때 발을 구르고(hop) 몸이 눌렸다 늘었다(squash)
+  // 하게 해서 움직인다는 느낌을 준다 — 애니메이션 프레임 없이 "생동감"만 만드는 흔한 수법이다.
+  const hop = Math.abs(Math.sin(m.bob || 0)) * 4 * vs;
+  const squash = Math.abs(Math.sin((m.bob || 0) * 2)) * 0.07;
+  SP.drawSprite(ctx, m.type, m.x, gy - hop, dw, dh,
+    { flip: m.face > 0, flash: m.flash > 0 ? m.flash * 3 : 0, sx: 1 + squash, sy: 1 - squash });
   // 몬스터 체력바 — 항상 보이게 (스펙 요구)
-  const bw = Math.max(40, dw);
-  bar(m.x - bw / 2, gy - dh - 12, bw, m.boss ? 8 : 5, m.hp / m.maxHp, m.boss ? '#ff4d4d' : '#ef7d7d');
+  const bw = Math.max(40 * vs, dw);
+  bar(m.x - bw / 2, gy - dh - 12 * vs, bw, (m.boss ? 8 : 5) * vs, m.hp / m.maxHp, m.boss ? '#ff4d4d' : '#ef7d7d');
   ctx.textAlign = 'center';
-  ctx.font = `${m.boss ? 'bold 12' : '10'}px ui-sans-serif, system-ui`;
+  ctx.font = `${m.boss ? 'bold ' + Math.round(12 * vs) : Math.round(10 * vs)}px ui-sans-serif, system-ui`;
   ctx.fillStyle = m.boss ? '#ffd166' : '#e8eef5';
-  ctx.fillText(`${m.def.name} ${Math.max(0, Math.ceil(m.hp))}`, m.x, gy - dh - 16);
+  ctx.fillText(`${m.def.name} ${Math.max(0, Math.ceil(m.hp))}`, m.x, gy - dh - 16 * vs);
 }
 
 function bar(x, y, w, h, ratio, color) {
@@ -1039,8 +1047,19 @@ function renderSkillbar() {
 }
 
 /* ---------- 메뉴 ---------- */
+// Auth.roster() 가 서버 fetch 라 값이 올 때까지 기다리지 않는다. 대신 tbody 하나만 있는
+// #rosterBody 를 직접 갈아끼운다 — renderMenu() 를 다시 부르면 이 fetch 가 또 걸려 무한루프가 된다.
+const rosterRows = list => list.map(r => `<tr>
+  <td class="${r.id === state.account.id ? 'me' : ''}">${r.name}</td><td>${r.id}</td><td>${r.role}</td>
+  <td>${r.level || '-'}</td><td>${(r.kills || 0).toLocaleString()}</td></tr>`).join('');
+let _rosterCache = [];
 function renderMenu() {
   const acc = state.account, sv = state.save, isAdmin = acc.role === 'admin';
+  if (isAdmin) Auth.roster().then(list => {
+    _rosterCache = list;
+    const tb = $('rosterBody');
+    if (tb) tb.innerHTML = rosterRows(list);
+  });
   $('menuWho').textContent = `${sv.name} · ${acc.id}${isAdmin ? ' · 관리자' : ''}`;
   const dur = sec => `${Math.floor(sec / 3600)}시간 ${Math.floor(sec % 3600 / 60)}분`;
 
@@ -1111,10 +1130,8 @@ function renderMenu() {
       </div></div>
 
     <div class="msec"><h5>접속자 현황</h5>
-      <div class="rosterwrap"><table class="roster"><tr><th>캐릭터</th><th>계정</th><th>권한</th><th>레벨</th><th>처치</th></tr>
-      ${Auth.roster().map(r => `<tr>
-        <td class="${r.id === acc.id ? 'me' : ''}">${r.name}</td><td>${r.id}</td><td>${r.role}</td>
-        <td>${r.level || '-'}</td><td>${(r.kills || 0).toLocaleString()}</td></tr>`).join('')}</table></div>
+      <div class="rosterwrap"><table class="roster"><thead><tr><th>캐릭터</th><th>계정</th><th>권한</th><th>레벨</th><th>처치</th></tr></thead>
+      <tbody id="rosterBody">${rosterRows(_rosterCache)}</tbody></table></div>
       ${(() => {
         // 서버 붙어 있으면 채널 접속자는 서버 roster(봇 포함), 아니면 로컬.
         const list = Net.connected ? Net.roster : state.players.map(p => ({ name: p.name, level: p.level }));
@@ -1148,9 +1165,10 @@ function renderMenu() {
     localStorage.removeItem(Store.key); location.reload();
   };
   const d = $('menuBody').querySelector('#mDelete');
-  if (d) d.onclick = () => {
+  if (d) d.onclick = async () => {
     if (!confirm(`계정 ${acc.id} 과 캐릭터를 함께 지운다. 되돌릴 수 없다.`)) return;
-    Auth.remove(acc.id); location.reload();
+    await Auth.remove(acc.id);
+    location.reload();
   };
 }
 
@@ -1306,6 +1324,10 @@ function fit() {
   cv.width = Math.round(state.vw * dpr);
   cv.height = Math.round(state.vh * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // 스프라이트를 논리 픽셀 고정 크기로 그리면, 화면이 넓어질수록 한 눈에 보이는
+  // 월드가 늘어나는데 캐릭터 크기는 그대로라 상대적으로 작아 보인다.
+  // 모바일 폭(480)을 기준 1배로 두고, 화면이 넓을수록 최대 3배까지 키운다.
+  state.viewScale = C.clamp(state.vw / 480, 1, 3);
 }
 
 /* ---------- 로그인 ---------- */
@@ -1336,7 +1358,7 @@ async function submitSignup() {
 
 /* ---------- 부팅 ---------- */
 async function boot() {
-  await Auth.seed();
+  // 관리 계정은 서버가 기동 시 스스로 만든다(server.js ensureAdmin) — 클라이언트가 할 일 없음.
   $('liGo').onclick = submitLogin;
   $('suGo').onclick = submitSignup;
   $('goSignup').onclick = () => showPanel('signup');

@@ -4,6 +4,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { createClient } = require('redis');
 const { Pool } = require('pg');
@@ -157,8 +158,109 @@ async function initDb() {
       created_at timestamptz NOT NULL DEFAULT now()
     )`);
   await pool.query('CREATE INDEX IF NOT EXISTS chats_user_time_idx ON chats (user_id, created_at DESC)');
+  //로그인 계정. saves 와 분리한다 — 계정은 "누구냐", saves 는 "그 캐릭터가 어디까지 갔냐"로 관심사가 다르다.
+  //예전엔 이걸 브라우저 localStorage 에만 뒀는데, 그러면 다른 기기에서 만든 계정을 알 방법이 없다.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS accounts (
+      user_id    text        PRIMARY KEY,
+      name       text        NOT NULL,
+      pw_hash    text        NOT NULL,
+      gender     text        NOT NULL DEFAULT 'male',
+      role       text        NOT NULL DEFAULT 'user',
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`);
   db = pool;
-  console.log('[db] Cloud SQL 연결, saves·chats 테이블 준비');
+  console.log('[db] Cloud SQL 연결, accounts·saves·chats 테이블 준비');
+  await ensureAdmin();
+}
+
+/* ---------- 계정 (Cloud SQL) ---------- */
+//pbkdf2 는 node 표준 내장이라 의존성이 안 늘어난다. salt 는 계정마다 다르게 둬서
+//같은 비번이라도 저장된 해시가 겹치지 않게 한다.
+function hashPw(pw, salt = crypto.randomBytes(16).toString('hex')) {
+  const hash = crypto.pbkdf2Sync(pw, salt, 100000, 32, 'sha256').toString('hex');
+  return `${salt}:${hash}`;
+}
+function verifyPw(pw, stored) {
+  const [salt, hash] = String(stored).split(':');
+  if (!salt || !hash) return false;
+  const a = Buffer.from(hash, 'hex'), b = Buffer.from(hashPw(pw, salt).split(':')[1], 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b); //길이·시간 비교로 타이밍 공격을 줄인다
+}
+
+//관리 계정은 없으면 만들고, 있으면 비번을 지금 값으로 맞춘다 — 예전에 클라이언트(auth.js)가 하던 걸 그대로 서버로 옮겼다.
+const ADMIN = { id: 'admin', pw: 'test123!' };
+async function ensureAdmin() {
+  await db.query(
+    `INSERT INTO accounts (user_id, name, pw_hash, role) VALUES ($1, $2, $3, 'admin')
+     ON CONFLICT (user_id) DO UPDATE SET pw_hash = $3`,
+    [ADMIN.id, '관리자', hashPw(ADMIN.pw)]
+  );
+}
+
+function validAccount(name, id, pw) {
+  if (!name || name.length < 1 || name.length > 10) return '캐릭터 이름은 1~10자로 정한다';
+  if (!id || id.length < 3) return '아이디는 3자 이상이어야 한다';
+  if (!/^[a-zA-Z0-9_]+$/.test(id)) return '아이디는 영문·숫자·밑줄만 쓸 수 있다';
+  if (!pw || pw.length < 4) return '비밀번호는 4자 이상이어야 한다';
+  return null;
+}
+
+async function accountSignup(name, id, pw, gender) {
+  if (!db) return { err: 'DB 연결 안 됨' };
+  const err = validAccount(name, id, pw);
+  if (err) return { err };
+  try {
+    const dup = await db.query('SELECT 1 FROM accounts WHERE user_id = $1 OR name = $2', [id, name]);
+    if (dup.rowCount) return { err: '이미 있는 아이디이거나 캐릭터 이름이다' };
+    const g = gender === 'female' ? 'female' : 'male';
+    await db.query('INSERT INTO accounts (user_id, name, pw_hash, gender) VALUES ($1, $2, $3, $4)',
+      [id, name, hashPw(pw), g]);
+    return { ok: { id, name, gender: g, role: 'user' } };
+  } catch (e) {
+    console.error('[account signup]', e.message);
+    return { err: '가입 실패' };
+  }
+}
+
+async function accountLogin(id, pw) {
+  if (!db) return { err: 'DB 연결 안 됨' };
+  try {
+    const r = await db.query('SELECT user_id, name, pw_hash, gender, role FROM accounts WHERE user_id = $1', [id]);
+    const row = r.rows[0];
+    if (!row) return { err: '없는 아이디다' };
+    if (!verifyPw(pw, row.pw_hash)) return { err: '비밀번호가 다르다' };
+    return { ok: { id: row.user_id, name: row.name, gender: row.gender, role: row.role } };
+  } catch (e) {
+    console.error('[account login]', e.message);
+    return { err: '로그인 실패' };
+  }
+}
+
+//관리자 화면의 접속자 현황. saves 를 왼쪽조인해서 레벨·처치도 같이 낸다(세이브가 없으면 미접속 취급).
+async function accountRoster() {
+  if (!db) return [];
+  try {
+    const r = await db.query(`
+      SELECT a.user_id AS id, a.name, a.role, COALESCE(s.level, 0) AS level, COALESCE((s.data->>'kills')::int, 0) AS kills
+      FROM accounts a LEFT JOIN saves s ON s.user_id = a.user_id
+      ORDER BY level DESC`);
+    return r.rows;
+  } catch (e) {
+    console.error('[account roster]', e.message);
+    return [];
+  }
+}
+
+async function accountRemove(id) {
+  if (!db) return false;
+  try {
+    const r = await db.query(`DELETE FROM accounts WHERE user_id = $1 AND role <> 'admin'`, [id]); //관리 계정은 못 지운다
+    return r.rowCount > 0;
+  } catch (e) {
+    console.error('[account remove]', e.message);
+    return false;
+  }
 }
 
 //채팅 1줄을 남긴다. 세이브 행이 아직 없으면(FK 위반) 조용히 버린다 — 접속 직후 몇 초의 채팅은 안 남을 수 있다.
@@ -300,6 +402,36 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     res.writeHead(405).end();
+    return;
+  }
+
+  //계정 가입/로그인. DB 한 곳에 두니 세이브랑 마찬가지로 어느 채널 파드·어느 기기로 접속해도 같다.
+  //ponytail: 세션·토큰이 없다 — id/pw 확인만 하고 끝. 로그인 뒤 요청은 여전히 무인증(/save 와 동일 수준).
+  if (urlPath === '/account/signup' && req.method === 'POST') {
+    const body = await readJson(req);
+    if (!body) { res.writeHead(400).end('bad json'); return; }
+    const r = await accountSignup(body.name, body.id, body.pw, body.gender);
+    res.writeHead(r.err ? 400 : 200, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(r));
+    return;
+  }
+  if (urlPath === '/account/login' && req.method === 'POST') {
+    const body = await readJson(req);
+    if (!body) { res.writeHead(400).end('bad json'); return; }
+    const r = await accountLogin(body.id, body.pw);
+    res.writeHead(r.err ? 400 : 200, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(r));
+    return;
+  }
+  if (urlPath === '/account/roster') {
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(await accountRoster()));
+    return;
+  }
+  if (urlPath === '/account/remove' && req.method === 'POST') {
+    const body = await readJson(req);
+    const ok = body && await accountRemove(body.id);
+    res.writeHead(ok ? 204 : 404).end();
     return;
   }
 
