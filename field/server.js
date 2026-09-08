@@ -137,11 +137,22 @@ async function initDb() {
   }
   const pool = new Pool({ connectionString: DATABASE_URL, max: 4 });
   pool.on('error', e => console.error('[db]', e.message)); //유휴 커넥션 에러로 프로세스가 죽지 않게
-  //user_id 를 PK 로 쓴다(계정 아이디 = 유일 + 안 바뀜 + 참조하는 테이블 없음 → 자동순차 id 불필요).
+  //로그인 계정. saves 보다 먼저 만든다 — saves.user_id 가 이 테이블을 FK로 참조하기 때문.
+  //예전엔 이걸 브라우저 localStorage 에만 뒀는데, 그러면 다른 기기에서 만든 계정을 알 방법이 없다.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS accounts (
+      user_id    text        PRIMARY KEY,
+      name       text        NOT NULL,
+      pw_hash    text        NOT NULL,
+      gender     text        NOT NULL DEFAULT 'male',
+      role       text        NOT NULL DEFAULT 'user',
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`);
+  //세이브는 계정 없이 존재할 수 없다 — accounts 를 FK로 참조, 계정이 삭제되면 세이브도 같이 지운다.
   //name·level 은 세이브를 안 열고도 목록·랭킹에서 쓰려고 컬럼으로도 뺐다. data 에도 그대로 들어있다.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS saves (
-      user_id    text        PRIMARY KEY,
+      user_id    text        PRIMARY KEY REFERENCES accounts(user_id) ON DELETE CASCADE,
       name       text        NOT NULL,
       level      int         NOT NULL DEFAULT 1,
       data       jsonb       NOT NULL,
@@ -158,17 +169,6 @@ async function initDb() {
       created_at timestamptz NOT NULL DEFAULT now()
     )`);
   await pool.query('CREATE INDEX IF NOT EXISTS chats_user_time_idx ON chats (user_id, created_at DESC)');
-  //로그인 계정. saves 와 분리한다 — 계정은 "누구냐", saves 는 "그 캐릭터가 어디까지 갔냐"로 관심사가 다르다.
-  //예전엔 이걸 브라우저 localStorage 에만 뒀는데, 그러면 다른 기기에서 만든 계정을 알 방법이 없다.
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS accounts (
-      user_id    text        PRIMARY KEY,
-      name       text        NOT NULL,
-      pw_hash    text        NOT NULL,
-      gender     text        NOT NULL DEFAULT 'male',
-      role       text        NOT NULL DEFAULT 'user',
-      created_at timestamptz NOT NULL DEFAULT now()
-    )`);
   db = pool;
   console.log('[db] Cloud SQL 연결, accounts·saves·chats 테이블 준비');
   await ensureAdmin();
