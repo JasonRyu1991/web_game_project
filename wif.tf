@@ -14,5 +14,5 @@ resource "google_iam_workload_identity_pool_provider" "pool_provider" {
     "attribute.actor" = "assertion.actor"
     "attribute.repository" = "assertion.repository"
   }
-  attribute_condition = "attribute.repository == 'JasonRyu1991/web_game_project'"
+  attribute_condition = "attribute.repository == 'JRyu91/web_game_project'"
 }

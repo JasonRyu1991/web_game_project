@@ -49,5 +49,5 @@ resource "google_project_iam_member" "wif_container_developer" {
 resource "google_service_account_iam_member" "wif_impersonate" {
   service_account_id = google_service_account.wif_service_account.name
   role                = "roles/iam.workloadIdentityUser"
-  member              = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.pool.name}/attribute.repository/JasonRyu1991/web_game_project"
+  member              = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.pool.name}/attribute.repository/JRyu91/web_game_project"
 }
